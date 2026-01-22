@@ -86,14 +86,16 @@ export function UploadContent() {
 						Add uploads to project:
 					</label>
 					<Select
-						onValueChange={setSelectedProjectId}
-						value={selectedProjectId}
+						onValueChange={(value) =>
+							setSelectedProjectId(value === "none" ? "" : value)
+						}
+						value={selectedProjectId || "none"}
 					>
 						<SelectTrigger className="w-full sm:w-64" id="project-select">
 							<SelectValue placeholder="Select a project (optional)" />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="">No project</SelectItem>
+							<SelectItem value="none">No project</SelectItem>
 							{projects?.map((project) => (
 								<SelectItem key={project.id} value={project.id}>
 									{project.name}

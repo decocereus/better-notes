@@ -23,6 +23,17 @@ export interface ContentSource {
 	error?: string;
 	/** Extracted content after processing */
 	content?: string;
+	/** Additional metadata from processing */
+	metadata?: {
+		content?: string;
+		pageTitle?: string;
+		pageId?: string;
+		blockCount?: number;
+		url?: string;
+		processedAt?: string;
+		error?: string;
+		failedAt?: string;
+	};
 }
 
 export interface Project {

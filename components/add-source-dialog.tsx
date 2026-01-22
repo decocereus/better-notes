@@ -1,9 +1,10 @@
 "use client";
 
 import { useMutation } from "convex/react";
-import { ExternalLink, Loader2, Upload } from "lucide-react";
+import { CheckCircle, ExternalLink, Loader2, Upload } from "lucide-react";
 import { useState } from "react";
 import type { UploadResponse } from "@/app/api/upload/route";
+import { NotionPageSearch } from "@/components/notion-page-search";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -14,8 +15,6 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { UploadZone } from "@/components/upload-zone";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -28,20 +27,9 @@ interface AddSourceDialogProps {
 
 type TabType = "notion" | "upload";
 
-// Regex for extracting page name from Notion URL (remove trailing ID hash)
-const NOTION_ID_REGEX = /-[a-f0-9]{32}$/i;
-const DASH_TO_SPACE_REGEX = /-/g;
-
-function isValidNotionUrl(url: string): boolean {
-	return url.includes("notion.so") || url.includes("notion.site");
-}
-
-function extractPageNameFromUrl(url: string): string {
-	const urlParts = url.split("/").pop()?.split("?")[0] || "";
-	const name = urlParts
-		.replace(NOTION_ID_REGEX, "")
-		.replace(DASH_TO_SPACE_REGEX, " ");
-	return name || "Notion Page";
+interface SelectedPage {
+	id: string;
+	title: string;
 }
 
 export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
@@ -49,43 +37,67 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 
 	const [open, setOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState<TabType>("notion");
-	const [notionUrl, setNotionUrl] = useState("");
+	const [selectedPage, setSelectedPage] = useState<SelectedPage | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [uploadedFiles, setUploadedFiles] = useState<UploadResponse[]>([]);
 
-	const handleAddNotionPage = async () => {
+	const handlePageSelect = (pageId: string, pageTitle: string) => {
+		setSelectedPage({ id: pageId, title: pageTitle });
 		setError(null);
+	};
 
-		const trimmedUrl = notionUrl.trim();
-		if (!trimmedUrl) {
-			setError("Please enter a Notion page URL");
+	const handleAddNotionPage = async () => {
+		if (!selectedPage) {
+			setError("Please select a Notion page");
 			return;
 		}
 
-		if (!isValidNotionUrl(trimmedUrl)) {
-			setError("Please enter a valid Notion URL");
-			return;
-		}
-
+		setError(null);
 		setIsLoading(true);
 
 		try {
-			const pageName = extractPageNameFromUrl(trimmedUrl);
-
+			// Store the page ID as reference (not URL)
+			// This allows us to fetch content directly via API
 			await addSource({
 				projectId: projectId as Id<"projects">,
 				type: "notion",
-				reference: trimmedUrl,
-				name: pageName,
+				reference: selectedPage.id,
+				name: selectedPage.title,
 			});
 
-			setNotionUrl("");
+			// Trigger processing of the source
+			await processNotionSource(selectedPage.id);
+
+			setSelectedPage(null);
 			setOpen(false);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to add source");
 		} finally {
 			setIsLoading(false);
+		}
+	};
+
+	const processNotionSource = async (pageId: string) => {
+		// Fetch and process the Notion page content
+		try {
+			const response = await fetch("/api/sources/process", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					projectId,
+					pageId,
+					type: "notion",
+				}),
+			});
+
+			if (!response.ok) {
+				const data = (await response.json()) as { error?: string };
+				throw new Error(data.error ?? "Failed to process source");
+			}
+		} catch (err) {
+			// Log but don't fail - source is added, processing can be retried
+			console.error("Failed to process source:", err);
 		}
 	};
 
@@ -123,7 +135,7 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 			setOpen(newOpen);
 			if (!newOpen) {
 				// Reset form on close
-				setNotionUrl("");
+				setSelectedPage(null);
 				setError(null);
 				setActiveTab("notion");
 				setUploadedFiles([]);
@@ -174,20 +186,33 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 				<div className="py-4">
 					{activeTab === "notion" ? (
 						<div className="grid gap-4">
-							<div className="grid gap-2">
-								<Label htmlFor="notion-url">Notion Page URL</Label>
-								<Input
-									disabled={isLoading}
-									id="notion-url"
-									onChange={(e) => setNotionUrl(e.target.value)}
-									placeholder="https://notion.so/..."
-									value={notionUrl}
+							<div className="relative grid gap-2">
+								<NotionPageSearch
+									onError={setError}
+									onSelect={handlePageSelect}
+									placeholder="Search for a Notion page..."
 								/>
 								<p className="text-muted-foreground text-xs">
-									Paste the URL of any Notion page you want to add as a content
-									source.
+									Search and select a Notion page to add as a content source.
 								</p>
 							</div>
+
+							{/* Selected page indicator */}
+							{selectedPage && (
+								<div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3">
+									<CheckCircle className="size-4 text-green-500" />
+									<span className="flex-1 truncate text-sm">
+										{selectedPage.title}
+									</span>
+									<Button
+										onClick={() => setSelectedPage(null)}
+										size="sm"
+										variant="ghost"
+									>
+										Change
+									</Button>
+								</div>
+							)}
 						</div>
 					) : (
 						<UploadZone
@@ -215,7 +240,7 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 					</Button>
 					{activeTab === "notion" && (
 						<Button
-							disabled={isLoading || !notionUrl.trim()}
+							disabled={isLoading || !selectedPage}
 							onClick={handleAddNotionPage}
 						>
 							{isLoading && <Loader2 className="size-4 animate-spin" />}

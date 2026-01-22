@@ -94,16 +94,16 @@ export function DashboardStats() {
 
 			setIsLoadingThemes(true);
 			try {
-				const response = await fetch(
-					`/api/themes?pageId=${encodeURIComponent(settings.themePageId)}`,
-					{
-						method: "GET",
-						headers: {
-							"Content-Type": "application/json",
-							"x-notion-api-key": settings.notionApiKey,
-						},
-					}
-				);
+				const response = await fetch("/api/themes", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						pageId: settings.themePageId,
+						apiKey: settings.notionApiKey,
+					}),
+				});
 
 				if (response.ok) {
 					const data = (await response.json()) as { themes: MainTheme[] };

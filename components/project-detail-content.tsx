@@ -222,6 +222,7 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 				) : (
 					<SourceList
 						onDelete={setDeleteSourceId}
+						projectId={projectId}
 						sources={project.sources.map((s) => ({
 							id: s.id as string,
 							type: s.type,
@@ -229,6 +230,8 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 							name: s.name,
 							addedAt: s.addedAt,
 							status: s.status,
+							metadata: s.metadata,
+							error: s.metadata?.error as string | undefined,
 						}))}
 					/>
 				)}

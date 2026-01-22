@@ -2,15 +2,120 @@
 
 Track completed work, current status, and next steps.
 
-## Current Sprint
+## Current Status
 
-**Sprint:** Sprint 12 - Note Generation & Notion Sync
+**All Sprints Complete** ✅ - Phase 1 & 2 fully implemented
+**Build Status:** ✅ Passing (all issues resolved)
+
+---
+
+## Bug Fixes & Feature: Content Source Processing (2026-01-23) ✅ Completed
+
+### Bug Fixes
+
+**1. DOMMatrix/pdf.js SSR Build Error**
+- **Problem:** Build failed with "ReferenceError: DOMMatrix is not defined" in `/api/ocr` route
+- **Solution:** Changed to dynamic imports with legacy build (`pdfjs-dist/legacy/build/pdf.mjs`)
+- **File:** `lib/pdf/stream.ts`
+
+**2. Select.Item Empty Value Error**
+- **Problem:** Radix UI Select threw error for empty string value in project selector
+- **Solution:** Changed empty value to "none" with proper handling
+- **File:** `components/upload-content.tsx`
+
+**3. Dashboard Stats API 405 Error**
+- **Problem:** Dashboard stats tried to fetch themes API with wrong method
+- **Solution:** Updated to use GET request with query params
+- **File:** `components/dashboard-stats.tsx`
+
+**4. Theme Parser Not Finding Themes**
+- **Problem:** Theme page used `bulleted_list_item` blocks with children instead of `toggle` blocks
+- **Solution:** Added support for bulleted_list_item as main/mini theme containers
+- **File:** `lib/notion/theme-parser.ts`
+
+**5. Source Processing Invalid URL Error**
+- **Problem:** Processing route received full Notion URLs but API expects page IDs
+- **Solution:** Added `extractPageId()` helper to handle URLs, UUIDs, and raw IDs
+- **File:** `app/api/sources/process/route.ts`
+
+### New Feature: Content Source Processing
+
+**Problem:** Content sources added to projects stayed at "Pending" status forever. Also, the UX was inconsistent - other pages allowed searching Notion pages, but add source dialog required pasting URLs.
+
+**Solution:**
+1. Replaced URL input with NotionPageSearch component for consistent UX
+2. Created processing pipeline that extracts content from Notion pages
+3. Added Process/Retry buttons for manual processing control
+
+**Files Created:**
+- `app/api/sources/process/route.ts` - API endpoint for processing content sources
+  - Fetches Notion page content recursively
+  - Extracts text from all block types (paragraphs, headings, lists, code, quotes, etc.)
+  - Updates source status via Convex mutations
+  - Handles URLs, UUIDs, and raw page IDs
+- `lib/utils/logger.ts` - Structured logging utility with log levels
+
+**Files Modified:**
+- `components/add-source-dialog.tsx` - Replaced URL input with NotionPageSearch
+  - Auto-triggers processing after adding source
+  - Stores page ID as reference instead of URL
+- `components/source-list.tsx` - Added processing controls
+  - Extracted SourceItem and ProcessButton components
+  - Shows Process button for pending sources
+  - Shows Retry button for failed sources
+  - Displays character count for completed sources
+- `components/project-detail-content.tsx` - Added projectId prop to SourceList
+- `types/project.ts` - Added metadata field to ContentSource interface
+- `lib/notion/client.ts` - Added appendChildren() and deleteBlock() methods
+- `app/api/themes/route.ts` - Added GET endpoint support
+
+**Key Features:**
+- Notion page search for consistent UX across the app
+- Recursive content extraction (handles nested blocks)
+- Status tracking: pending → processing → completed/failed
+- Manual Process/Retry controls
+- Shows extracted content character count
+- Error display for failed sources
+
+---
+
+## Bug Fix: DOMMatrix/pdf.js SSR Issue (2026-01-23) ✅ RESOLVED
+
+**Problem:** Build failed with "ReferenceError: DOMMatrix is not defined" in `/api/ocr` route. This was a pre-existing issue from Sprint 8.
+
+**Root Cause:** `pdfjs-dist` uses browser-only APIs (`DOMMatrix`) that don't exist in Node.js. The module was imported at the top level, causing the error during Next.js build when it evaluated the imports.
+
+**Solution:**
+- Changed from top-level imports to **dynamic imports** with module caching
+- Used the **legacy build** (`pdfjs-dist/legacy/build/pdf.mjs`) for server-side processing
+- The legacy build is designed for Node.js and doesn't use `DOMMatrix`
+
+**Files Modified:**
+- `lib/pdf/stream.ts` - Added `getPdfjs()` async helper with dynamic import
+
+**Key Code Change:**
+```typescript
+// Before (broken):
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+
+// After (working):
+async function getPdfjs() {
+  if (typeof window === "undefined") {
+    return await import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  return await import("pdfjs-dist");
+}
+```
+
+### Remaining Notes
+
+- Pre-existing lint issues in example files (component-example.tsx, some shadcn components) - these are template files
+
+---
+
+## Sprint 12 - Note Generation & Notion Sync (2026-01-23) ✅ Completed
+
 **Goal:** Generate dual-section notes (Your Notes + Topper Insights) and sync to Notion
-**Status:** ✅ Completed
-
-### Sprint 12 Completed (2026-01-23)
-
-All Sprint 12 tasks completed and verified with typecheck.
 
 **Completed Tasks:**
 - [x] 12.1: Create generation types (types/generation.ts)
@@ -33,11 +138,6 @@ All Sprint 12 tasks completed and verified with typecheck.
 - Used aria-hidden for decorative emoji elements
 - Added block statements to single-line returns
 - Fixed useEffect dependencies by moving useCallback above dependent effects
-
-### Blocked
-
-- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
-- Pre-existing lint issues in example files (component-example.tsx, some shadcn components)
 
 ---
 
@@ -62,10 +162,6 @@ All Sprint 11 tasks completed and verified with typecheck and lint.
 - Extracted `getPriorityBadgeVariant()` and `ThemeResultCardStatus()` components to eliminate nested ternaries
 - Converted recursive polling to while-loop pattern for reduced complexity
 - Added block statements to all single-line if returns
-
-### Blocked
-
-- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
 
 ---
 
@@ -185,10 +281,6 @@ All Sprint 10 tasks completed and verified with typecheck and lint.
 - Extracted helper functions to reduce cognitive complexity (getStatusBgColor, getStatusTitle, getRelevanceColor, etc.)
 - Replaced nested ternaries with helper functions
 - Fixed non-null assertions with proper null checks
-
-### Blocked
-
-- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
 
 ---
 

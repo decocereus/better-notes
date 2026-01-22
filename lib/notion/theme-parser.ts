@@ -3,6 +3,7 @@
  * Parses hierarchical structure: Main Theme → Mini Theme → Questions
  */
 
+import { createLogger } from "@/lib/utils/logger";
 import type { EssayQuestion, MainTheme, MiniTheme, ThemeData } from "@/types";
 import {
 	extractBlockText,
@@ -12,6 +13,8 @@ import {
 } from "./block-parser";
 import type { NotionClient } from "./client";
 import type { NotionBlock, NotionPage } from "./types";
+
+const log = createLogger("theme-parser");
 
 /**
  * Regex pattern for extracting year from question text.
@@ -72,11 +75,23 @@ function extractQuestionsFromBlocks(blocks: NotionBlock[]): EssayQuestion[] {
 }
 
 /**
- * Checks if a block starts a new mini theme (toggle, h2, or h3).
+ * Checks if a block starts a new mini theme.
+ * Supports: toggle blocks, h2/h3 headings, or bulleted_list_items with children.
  */
 function isMiniThemeBlock(block: NotionBlock): boolean {
 	const headingLevel = getHeadingLevel(block);
-	return isToggleBlock(block) || headingLevel === 2 || headingLevel === 3;
+
+	// Toggle or h2/h3 heading
+	if (isToggleBlock(block) || headingLevel === 2 || headingLevel === 3) {
+		return true;
+	}
+
+	// Bulleted list item with children (nested content)
+	if (block.type === "bulleted_list_item" && block.has_children) {
+		return true;
+	}
+
+	return false;
 }
 
 /**
@@ -127,10 +142,22 @@ async function handleNewMiniTheme(
 	const miniTheme = createMiniTheme(block, parentId);
 	miniThemes.push(miniTheme);
 
-	// If it's a toggle with children, fetch and parse them
-	if (isToggleBlock(block) && block.has_children) {
+	// If it's a collapsible block with children (toggle or bulleted list), fetch and parse them
+	const isCollapsible =
+		isToggleBlock(block) || block.type === "bulleted_list_item";
+
+	if (isCollapsible && block.has_children) {
+		log.debug(
+			`Fetching children for mini theme "${miniTheme.title.slice(0, 30)}"`
+		);
 		const children = await client.getBlockChildren(block.id);
+		log.debug(
+			`Mini theme "${miniTheme.title.slice(0, 30)}" has ${children.length} children`
+		);
 		miniTheme.questions = extractQuestionsFromBlocks(children);
+		log.debug(
+			`Extracted ${miniTheme.questions.length} questions from mini theme "${miniTheme.title.slice(0, 30)}"`
+		);
 	}
 
 	return miniTheme;
@@ -192,11 +219,23 @@ async function parseMiniThemes(
 }
 
 /**
- * Checks if a block starts a new main theme (toggle or h1).
+ * Checks if a block starts a new main theme.
+ * Supports: toggle blocks, h1 headings, or bulleted_list_items with children.
  */
 function isMainThemeBlock(block: NotionBlock): boolean {
 	const headingLevel = getHeadingLevel(block);
-	return isToggleBlock(block) || headingLevel === 1;
+
+	// Toggle or h1 heading
+	if (isToggleBlock(block) || headingLevel === 1) {
+		return true;
+	}
+
+	// Bulleted list item with children (common Notion pattern for collapsible sections)
+	if (block.type === "bulleted_list_item" && block.has_children) {
+		return true;
+	}
+
+	return false;
 }
 
 /**
@@ -241,9 +280,18 @@ async function handleNewMainTheme(
 	const mainTheme = createMainTheme(block);
 	themes.push(mainTheme);
 
-	// If it's a toggle with children, parse them as mini themes
-	if (isToggleBlock(block) && block.has_children) {
+	// If it's a collapsible block with children (toggle or bulleted list), parse children as mini themes
+	const isCollapsible =
+		isToggleBlock(block) || block.type === "bulleted_list_item";
+
+	if (isCollapsible && block.has_children) {
+		log.debug(
+			`Fetching children for main theme "${mainTheme.title.slice(0, 30)}"`
+		);
 		const children = await client.getBlockChildren(block.id);
+		log.debug(
+			`Main theme "${mainTheme.title.slice(0, 30)}" has ${children.length} children`
+		);
 		mainTheme.miniThemes = await parseMiniThemes(
 			children,
 			client,
@@ -262,23 +310,36 @@ async function parseMainThemes(
 	blocks: NotionBlock[],
 	client: NotionClient
 ): Promise<MainTheme[]> {
+	log.debug(`parseMainThemes: Processing ${blocks.length} blocks`);
 	const themes: MainTheme[] = [];
 	let currentMainTheme: MainTheme | null = null;
 	const pendingBlocks: NotionBlock[] = [];
 
 	for (const block of blocks) {
 		const text = extractBlockText(block);
+		const headingLevel = getHeadingLevel(block);
+		const isToggle = isToggleBlock(block);
+		const isMain = isMainThemeBlock(block);
 
-		if (isMainThemeBlock(block) && text) {
+		log.debug(
+			`Block: type=${block.type}, isToggle=${isToggle}, headingLevel=${headingLevel}, isMainTheme=${isMain}, text="${text.slice(0, 40)}"`
+		);
+
+		if (isMain && text) {
 			// Process pending blocks for previous theme
 			if (currentMainTheme) {
 				await processPendingBlocks(pendingBlocks, currentMainTheme, client);
 				pendingBlocks.length = 0;
 			}
 
+			log.info(`Found main theme: "${text.slice(0, 50)}"`);
 			currentMainTheme = await handleNewMainTheme(block, themes, client);
 		} else if (currentMainTheme) {
 			pendingBlocks.push(block);
+		} else {
+			log.debug(
+				`Skipping block (no current main theme): type=${block.type}, text="${text.slice(0, 40)}"`
+			);
 		}
 	}
 
@@ -287,6 +348,7 @@ async function parseMainThemes(
 		await processPendingBlocks(pendingBlocks, currentMainTheme, client);
 	}
 
+	log.debug(`parseMainThemes: Found ${themes.length} main themes`);
 	return themes;
 }
 
@@ -316,15 +378,45 @@ export async function parseThemePage(
 	client: NotionClient,
 	pageId: string
 ): Promise<ThemeData> {
+	log.info(`Starting theme page parse for pageId: ${pageId}`);
+
 	// Fetch page metadata
 	const page = await client.getPage(pageId);
 	const pageTitle = extractPageTitle(page);
+	log.info(`Page title: "${pageTitle}"`);
 
 	// Fetch all top-level blocks
 	const blocks = await client.getPageContent(pageId);
+	log.info(`Fetched ${blocks.length} top-level blocks`);
+
+	// Log block types for debugging
+	const blockTypeCounts: Record<string, number> = {};
+	for (const block of blocks) {
+		blockTypeCounts[block.type] = (blockTypeCounts[block.type] || 0) + 1;
+	}
+	log.debug("Block type distribution:", blockTypeCounts);
+
+	// Log first few blocks for debugging
+	if (blocks.length > 0) {
+		log.debug(
+			"First 5 blocks:",
+			blocks.slice(0, 5).map((b) => ({
+				id: b.id.slice(0, 8),
+				type: b.type,
+				hasChildren: b.has_children,
+				text: extractBlockText(b).slice(0, 50),
+			}))
+		);
+	}
 
 	// Parse themes from blocks
 	const themes = await parseMainThemes(blocks, client);
+
+	log.info(
+		`Parsing complete: ${themes.length} main themes, ` +
+			`${themes.reduce((acc, t) => acc + t.miniThemes.length, 0)} mini themes, ` +
+			`${themes.reduce((acc, t) => acc + t.miniThemes.reduce((a, m) => a + m.questions.length, 0), 0)} questions`
+	);
 
 	return {
 		pageId,

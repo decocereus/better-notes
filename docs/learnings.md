@@ -466,3 +466,32 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** Biome's `useTopLevelRegex` flagged regex literals inside functions
 **Solution:** Move patterns to module-level constants: `const BULLET_REGEX = /^[-*•]\s+(.+)$/;`
 **Lesson:** Regex compilation happens on each function call if defined inside - define at module level for efficiency
+
+### 2026-01-23 - pdf.js DOMMatrix SSR Build Error
+
+**Context:** Next.js build failing with "ReferenceError: DOMMatrix is not defined" in API routes using pdf.js
+**Problem:** `pdfjs-dist` uses browser-only APIs (`DOMMatrix`) at module load time, before any code runs. Top-level imports like `import { getDocument } from "pdfjs-dist"` cause the error because the module is evaluated during build.
+**Solution:** Use dynamic imports with the **legacy build** for server-side:
+```typescript
+async function getPdfjs() {
+  if (typeof window === "undefined") {
+    return await import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  return await import("pdfjs-dist");
+}
+```
+**Lesson:** Libraries with browser-only APIs need dynamic imports in Next.js API routes. The pdf.js legacy build (`pdfjs-dist/legacy/build/pdf.mjs`) is designed for Node.js and avoids browser APIs. Cache the module to avoid repeated imports.
+
+### 2026-01-23 - Extracting Components to Reduce Complexity
+
+**Context:** SourceList component had nested conditionals for processing states and button icons
+**Problem:** Biome flagged cognitive complexity (23) and nested ternary in button icon logic
+**Solution:** Extract `SourceItem` and `ProcessButton` as separate components with their own render functions
+**Lesson:** When a list item has complex logic, extract it to a dedicated component - this naturally reduces complexity by distributing logic across focused components
+
+### 2026-01-23 - ConvexHttpClient for Server-Side Mutations
+
+**Context:** API routes need to update Convex database (update source status during processing)
+**Problem:** Can't use `useMutation` hook in server-side code (API routes)
+**Solution:** Use `ConvexHttpClient` with direct mutation calls: `const convex = new ConvexHttpClient(url); await convex.mutation(api.projects.updateSource, { ... })`
+**Lesson:** Convex provides `ConvexHttpClient` for server-side operations - same API surface as client hooks but works without React

@@ -2,17 +2,40 @@
  * PDF Streaming Utility
  * Handles streaming PDFs from R2 for page-by-page processing.
  * Optimized for large files (190MB+) to avoid memory issues.
+ *
+ * Uses dynamic imports with the legacy build to avoid DOMMatrix SSR issues.
  */
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import { getReadUrl } from "@/lib/storage";
 
-// Set up the worker for pdf.js (required for parsing)
-// In Next.js, we use the legacy build which doesn't require a separate worker
-if (typeof window === "undefined") {
-	// Server-side: use the legacy build
-	GlobalWorkerOptions.workerSrc = "";
+/**
+ * Cached pdf.js module to avoid repeated dynamic imports.
+ */
+let pdfjsModule: typeof import("pdfjs-dist") | null = null;
+
+/**
+ * Lazily loads the pdf.js module.
+ * Uses the legacy build on the server to avoid DOMMatrix issues.
+ */
+async function getPdfjs(): Promise<typeof import("pdfjs-dist")> {
+	if (pdfjsModule) {
+		return pdfjsModule;
+	}
+
+	// Use legacy build for Node.js (server-side)
+	// The legacy build doesn't use DOMMatrix and other browser-only APIs
+	if (typeof window === "undefined") {
+		const legacyPdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+		// Disable worker for server-side processing
+		legacyPdfjs.GlobalWorkerOptions.workerSrc = "";
+		pdfjsModule = legacyPdfjs as unknown as typeof import("pdfjs-dist");
+	} else {
+		// Use standard build for browser
+		pdfjsModule = await import("pdfjs-dist");
+	}
+
+	return pdfjsModule;
 }
 
 /**
@@ -96,6 +119,9 @@ export async function loadPdfFromR2(
 ): Promise<PdfLoadResult> {
 	const { key, password } = options;
 
+	// Get pdf.js module (uses legacy build on server)
+	const pdfjs = await getPdfjs();
+
 	// Get a signed URL for the PDF (valid for 1 hour)
 	const urlResult = await getReadUrl({
 		key,
@@ -103,7 +129,7 @@ export async function loadPdfFromR2(
 	});
 
 	// Load the PDF using pdf.js
-	const loadingTask = getDocument({
+	const loadingTask = pdfjs.getDocument({
 		url: urlResult.readUrl,
 		password,
 		// Disable streaming for server-side processing

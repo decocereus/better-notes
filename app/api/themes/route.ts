@@ -6,6 +6,9 @@ import { NextResponse } from "next/server";
 import { NotionClient } from "@/lib/notion/client";
 import { getNotionApiKey } from "@/lib/notion/config";
 import { getThemeStats, parseThemePage } from "@/lib/notion/theme-parser";
+import { createLogger } from "@/lib/utils/logger";
+
+const log = createLogger("api/themes");
 
 interface ThemesRequestBody {
 	apiKey?: string;
@@ -35,13 +38,19 @@ export function GET() {
  * Returns: { themes, pageTitle, parsedAt, stats }
  */
 export async function POST(request: Request) {
+	log.info("POST /api/themes - Starting theme parsing request");
+
 	try {
 		const body = (await request.json()) as ThemesRequestBody;
 		const { pageId } = body;
 		const apiKey = getNotionApiKey(body.apiKey);
 
+		log.info(`Parsing themes for pageId: ${pageId}`);
+		log.debug(`API key present: ${!!apiKey}, from body: ${!!body.apiKey}`);
+
 		// Validate required fields
 		if (!apiKey) {
+			log.warn("No API key configured");
 			return NextResponse.json(
 				{
 					error:
@@ -52,6 +61,7 @@ export async function POST(request: Request) {
 		}
 
 		if (!pageId) {
+			log.warn("No pageId provided");
 			return NextResponse.json(
 				{ error: "Page ID is required" },
 				{ status: 400 }
@@ -60,8 +70,14 @@ export async function POST(request: Request) {
 
 		// Create client and parse themes
 		const client = new NotionClient(apiKey);
+		log.info("Starting parseThemePage...");
 		const themeData = await parseThemePage(client, pageId);
 		const stats = getThemeStats(themeData.themes);
+
+		log.info(
+			`Theme parsing complete: ${stats.totalMainThemes} main themes, ` +
+				`${stats.totalMiniThemes} mini themes, ${stats.totalQuestions} questions`
+		);
 
 		return NextResponse.json({
 			themes: themeData.themes,
@@ -71,6 +87,8 @@ export async function POST(request: Request) {
 			stats,
 		});
 	} catch (error) {
+		log.error("Error parsing themes:", error);
+
 		// Handle Notion API errors
 		if (error instanceof Error) {
 			// Check for common Notion errors

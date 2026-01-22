@@ -3,6 +3,7 @@
  * Provides typed methods for common Notion operations.
  */
 
+import { createLogger } from "@/lib/utils/logger";
 import type {
 	NotionBlock,
 	NotionBlocksResponse,
@@ -12,6 +13,7 @@ import type {
 	SearchResultItem,
 } from "./types";
 
+const log = createLogger("notion-client");
 const NOTION_VERSION = "2025-09-03";
 const BASE_URL = "https://api.notion.com/v1";
 
@@ -122,18 +124,30 @@ export class NotionClient {
 	 * @returns Array of all blocks in the page
 	 */
 	async getPageContent(pageId: string): Promise<NotionBlock[]> {
+		log.debug(`getPageContent: Fetching blocks for page ${pageId}`);
 		const blocks: NotionBlock[] = [];
 		let cursor: string | undefined;
+		let pageNum = 0;
 
 		do {
+			pageNum++;
 			const endpoint = `/blocks/${pageId}/children${cursor ? `?start_cursor=${cursor}` : ""}`;
+			log.debug(
+				`getPageContent: Fetching page ${pageNum}, endpoint: ${endpoint}`
+			);
 			const response = await this.request<NotionBlocksResponse>(endpoint);
+			log.debug(
+				`getPageContent: Page ${pageNum} returned ${response.results.length} blocks, has_more=${response.has_more}`
+			);
 			blocks.push(...response.results);
 			cursor = response.has_more
 				? (response.next_cursor ?? undefined)
 				: undefined;
 		} while (cursor);
 
+		log.info(
+			`getPageContent: Total ${blocks.length} blocks fetched for page ${pageId}`
+		);
 		return blocks;
 	}
 
