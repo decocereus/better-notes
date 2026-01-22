@@ -159,6 +159,32 @@ export class NotionClient {
 	}
 
 	/**
+	 * Appends blocks to a page or block.
+	 * @param parentId - The page or block ID to append to
+	 * @param children - Array of block objects to append
+	 * @returns Response with created blocks
+	 */
+	appendChildren(
+		parentId: string,
+		children: unknown[]
+	): Promise<NotionBlocksResponse> {
+		return this.request<NotionBlocksResponse>(`/blocks/${parentId}/children`, {
+			method: "PATCH",
+			body: JSON.stringify({ children }),
+		});
+	}
+
+	/**
+	 * Deletes a block by ID.
+	 * @param blockId - The block ID to delete
+	 */
+	async deleteBlock(blockId: string): Promise<void> {
+		await this.request(`/blocks/${blockId}`, {
+			method: "DELETE",
+		});
+	}
+
+	/**
 	 * Converts a Notion page or database to a simplified search result item.
 	 */
 	private toSearchResultItem(

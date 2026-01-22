@@ -1,8 +1,8 @@
 import { ChevronRight, Database, Settings2, Sliders } from "lucide-react";
 import Link from "next/link";
 
-import { NotionConnector } from "@/components/notion-connector";
 import { Card } from "@/components/ui/card";
+import { SettingsClientWrapper } from "./settings-client-wrapper";
 
 const SETTINGS_SECTIONS = [
 	{
@@ -61,8 +61,8 @@ export default function SettingsPage() {
 				))}
 			</Card>
 
-			{/* Notion Connection Section - Client Component */}
-			<NotionConnector />
+			{/* Notion Connection & Output Config - Client Components */}
+			<SettingsClientWrapper />
 		</div>
 	);
 }

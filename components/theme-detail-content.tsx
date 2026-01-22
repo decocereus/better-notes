@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { NoteGenerationPanel } from "@/components/note-generation-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -252,8 +253,38 @@ export function ThemeDetailContent({ themeId }: ThemeDetailContentProps) {
 					</div>
 				)}
 			</Card>
+
+			{/* Note Generation - Only for Mini Theme view with content */}
+			{!isMainThemeView &&
+				themeData.miniTheme &&
+				themeData.classifiedContent && (
+					<NoteGenerationPanel
+						content={getAllContentFromThemeContent(themeData.classifiedContent)}
+						mainTheme={themeData.mainTheme}
+						miniTheme={themeData.miniTheme}
+					/>
+				)}
 		</div>
 	);
+}
+
+/**
+ * Extracts all content items from a ThemeContent object.
+ */
+function getAllContentFromThemeContent(
+	themeContent: ThemeContent
+): ExtractedContent[] {
+	const { content } = themeContent;
+	return [
+		...content.introductions,
+		...content.conclusions,
+		...content.examples,
+		...content.quotes,
+		...content.thinkers,
+		...content.arguments,
+		...content.booksPoems,
+		...content.keywords,
+	];
 }
 
 function NoThemePageState() {

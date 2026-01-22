@@ -438,3 +438,31 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** Biome's exhaustive-deps rule required `pollComparisonResults` in dependency array
 **Solution:** Move `pollComparisonResults` definition BEFORE `startComparison`, then add to its dependency array
 **Lesson:** When useCallback A calls useCallback B, define B first - dependency order follows call order
+
+### 2026-01-23 - aria-hidden for Decorative Emojis
+
+**Context:** Using emoji in Badge component for cross-theme references
+**Problem:** `aria-label` is not valid on span elements without a role
+**Solution:** Use `aria-hidden="true"` for decorative content like emojis that don't add meaningful information
+**Lesson:** Decorative elements should be hidden from screen readers with aria-hidden, not labeled
+
+### 2026-01-23 - Content-Based Keys Instead of Array Index
+
+**Context:** Rendering list items with `.map()` and using index as key
+**Problem:** Biome's `noArrayIndexKey` rule flags using array index as React key
+**Solution:** Use content-based keys like `key={item-${item.slice(0, 30)}}` or unique IDs from the data
+**Lesson:** Array indices can cause issues when items are reordered or filtered - use stable, unique keys from content
+
+### 2026-01-23 - Render Functions for Nested Ternaries
+
+**Context:** Button content with multiple states (syncing, synced, default)
+**Problem:** Nested ternary `isSyncing ? ... : isSynced ? ... : ...` flagged by linter
+**Solution:** Extract to a `renderButtonContent()` function with if statements and early returns
+**Lesson:** Use render helper functions inside components to avoid nested ternaries - cleaner and linter-friendly
+
+### 2026-01-23 - Top-Level Regex Constants for Performance
+
+**Context:** Regex patterns for bullet points and headers in content renderer
+**Problem:** Biome's `useTopLevelRegex` flagged regex literals inside functions
+**Solution:** Move patterns to module-level constants: `const BULLET_REGEX = /^[-*•]\s+(.+)$/;`
+**Lesson:** Regex compilation happens on each function call if defined inside - define at module level for efficiency

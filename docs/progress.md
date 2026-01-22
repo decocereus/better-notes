@@ -6,7 +6,40 @@ Track completed work, current status, and next steps.
 
 **Sprint:** Sprint 12 - Note Generation & Notion Sync
 **Goal:** Generate dual-section notes (Your Notes + Topper Insights) and sync to Notion
-**Status:** 🔜 Ready to Start
+**Status:** ✅ Completed
+
+### Sprint 12 Completed (2026-01-23)
+
+All Sprint 12 tasks completed and verified with typecheck.
+
+**Completed Tasks:**
+- [x] 12.1: Create generation types (types/generation.ts)
+- [x] 12.2: Create generation prompts (lib/llm/prompts/generation.ts)
+- [x] 12.3: Create note generator (lib/generation/note-generator.ts)
+- [x] 12.4: Create conciseness enforcer (lib/generation/conciseness.ts)
+- [x] 12.5: Create Notion block builder (lib/notion/block-builder.ts)
+- [x] 12.6: Create Notion destination config (settings UI)
+- [x] 12.7: Create Notion sync API (app/api/notion/sync/route.ts)
+- [x] 12.8: Create generate API route (app/api/generate/route.ts)
+- [x] 12.9: Create notes preview component (components/revision-note.tsx)
+- [x] 12.10: Create sync status component (components/sync-status.tsx)
+- [x] 12.11: Integrate notes into theme page
+- [x] 12.12: Create notes list page
+
+**Lint fixes applied:**
+- Moved regex patterns to top-level constants for performance
+- Replaced nested ternaries with render functions
+- Used content-based keys instead of array indices
+- Used aria-hidden for decorative emoji elements
+- Added block statements to single-line returns
+- Fixed useEffect dependencies by moving useCallback above dependent effects
+
+### Blocked
+
+- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
+- Pre-existing lint issues in example files (component-example.tsx, some shadcn components)
+
+---
 
 ### Sprint 11 Completed (2026-01-23)
 
@@ -37,6 +70,55 @@ All Sprint 11 tasks completed and verified with typecheck and lint.
 ---
 
 ## Completed Work
+
+### Sprint 12 - Note Generation & Notion Sync (2026-01-23) - Completed
+
+**Demo:** Users can generate dual-section revision notes (Your Notes + Topper Insights) from classified content. Notes enforce word limits (350 for Your Notes, 300 for Topper Insights) using LLM-based condensation. Generated notes can be synced to a configured Notion page, with bulk sync support for multiple notes.
+
+**Files Created:**
+- `types/generation.ts` - Types for GeneratedNote, NoteSection, NoteItem, SyncResult, SyncStatus
+- `lib/llm/prompts/generation.ts` - System prompts for note generation and condensation
+- `lib/llm/schemas/generation.ts` - Zod schemas for structured LLM note output
+- `lib/generation/note-generator.ts` - Main note generation with dual-section format
+- `lib/generation/conciseness.ts` - Word limit enforcement with LLM-based condensation
+- `lib/generation/index.ts` - Barrel export for generation module
+- `lib/notion/block-builder.ts` - Convert GeneratedNote to Notion block format
+- `app/api/generate/route.ts` - POST endpoint to generate notes for a theme
+- `app/api/notion/sync/route.ts` - POST endpoint to sync notes to Notion
+- `app/api/notion/page/[pageId]/route.ts` - GET endpoint for page info
+- `components/revision-note.tsx` - Note preview with dual-section display
+- `components/sync-status.tsx` - Sync status display, button, badge, bulk sync
+- `components/note-generation-panel.tsx` - Generation panel for theme pages
+- `components/notion-destination-config.tsx` - Output page search and selection
+- `components/notes-list-content.tsx` - Notes list with search, filter, bulk sync
+- `app/notes/page.tsx` - Notes list page route
+
+**Files Modified:**
+- `lib/notion/client.ts` - Added appendChildren() and deleteBlock() methods
+- `app/api/notion/search/route.ts` - Added GET endpoint for search with query params
+- `app/settings/page.tsx` - Updated to use SettingsClientWrapper
+- `components/theme-detail-content.tsx` - Added NoteGenerationPanel for mini themes
+
+**Key Features:**
+- Dual-section note format: "Your Notes" (user content, 350 words max) + "Topper Insights" (topper additions, 300 words max)
+- LLM-based note generation using Claude via structured output
+- Word limit enforcement with intelligent condensation
+- Cross-theme references flagged for multi-use content
+- Sync to Notion with append/replace modes
+- Bulk sync for multiple notes with progress tracking
+- Search and filter notes by theme
+- Notes grouped by main theme
+- Copy section content to clipboard
+- Sync status tracking (not_synced, syncing, synced, failed)
+
+**Architecture:**
+- Uses Vercel AI SDK `generateObject` with Zod schemas for type-safe LLM output
+- Notes include version tracking for regeneration
+- Notion blocks include headers, dividers, bullet lists, and callouts
+- Settings store output page ID for sync destination
+- Generation panel integrated into mini theme detail view
+
+---
 
 ### Sprint 11 - Comparison & Gap Analysis (2026-01-23) - Completed
 

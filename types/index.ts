@@ -41,6 +41,26 @@ export type {
 	ThemeMapping,
 } from "./extraction";
 export { DEFAULT_EXTRACTION_PARAMETERS } from "./extraction";
+// Generation types (Sprint 12)
+export type {
+	CrossThemeRef,
+	GeneratedNote,
+	GeneratedNoteSummary,
+	GenerateNotesInput,
+	GenerationConfig,
+	GenerationJob,
+	GenerationJobType,
+	GenerationStatus,
+	NoteItem,
+	NoteItemType,
+	NoteSection,
+	NotesStats,
+	NotionDestination,
+	SyncNotesToNotionInput,
+	SyncResult,
+	SyncStatus,
+} from "./generation";
+export { DEFAULT_GENERATION_CONFIG } from "./generation";
 // Processing types
 export type {
 	OcrJobResults,

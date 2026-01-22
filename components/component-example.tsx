@@ -30,7 +30,8 @@ import {
 	SunIcon,
 	UserIcon,
 } from "lucide-react";
-import * as React from "react";
+import Image from "next/image";
+import { useState } from "react";
 import { Example, ExampleWrapper } from "@/components/example";
 import {
 	AlertDialog,
@@ -106,11 +107,13 @@ function CardExample() {
 		<Example className="items-center justify-center" title="Card">
 			<Card className="relative w-full max-w-sm overflow-hidden pt-0">
 				<div className="absolute inset-0 z-30 aspect-video bg-primary opacity-50 mix-blend-color" />
-				<img
-					alt="Photo by mymind on Unsplash"
+				<Image
+					alt="Colorful sticky notes on a wall by mymind on Unsplash"
 					className="relative z-20 aspect-video w-full object-cover brightness-60 grayscale"
+					height={400}
 					src="https://images.unsplash.com/photo-1604076850742-4c7221f3101b?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
-					title="Photo by mymind on Unsplash"
+					title="Colorful sticky notes by mymind on Unsplash"
+					width={600}
 				/>
 				<CardHeader>
 					<CardTitle>Observability Plus is replacing Monitoring</CardTitle>
@@ -163,12 +166,12 @@ const frameworks = [
 ] as const;
 
 function FormExample() {
-	const [notifications, setNotifications] = React.useState({
+	const [notifications, setNotifications] = useState({
 		email: true,
 		sms: false,
 		push: true,
 	});
-	const [theme, setTheme] = React.useState("light");
+	const [theme, setTheme] = useState("light");
 
 	return (
 		<Example title="Form">
