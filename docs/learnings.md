@@ -340,3 +340,45 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** Biome auto-removes unused imports on save/fix
 **Solution:** Add both the import AND the usage in the same edit, or disable auto-fix while working
 **Lesson:** When refactoring to use new components, add both import and usage together to avoid linter removing the import
+
+### 2026-01-23 - Disabling noBarrelFile Rule Globally
+
+**Context:** Linting errors on barrel files (index.ts with re-exports) in lib/ai, lib/storage, lib/extraction, etc.
+**Problem:** Biome's `noBarrelFile` rule flagged all barrel exports as performance issues
+**Solution:** Added `"performance": { "noBarrelFile": "off" }` to biome.jsonc linter rules
+**Lesson:** Barrel files are a legitimate pattern when tree-shaking is handled properly - disable the rule project-wide if barrel exports are standard in your codebase
+
+### 2026-01-23 - Top-Level Regex for Performance
+
+**Context:** Regex patterns defined inside functions for content matching
+**Problem:** Biome's `useTopLevelRegex` rule flagged regex literals inside functions
+**Solution:** Move regex patterns to module-level constants (e.g., `const WORD_SPLIT_REGEX = /\s+/;`)
+**Lesson:** Regex patterns should be defined at module level to avoid re-compilation on each function call - improves performance
+
+### 2026-01-23 - Reducing Cognitive Complexity by Extracting Helpers
+
+**Context:** `calculateQuality` function had complexity of 24 (max 15) with loops and conditionals
+**Problem:** Biome's `noExcessiveCognitiveComplexity` rule blocked commit
+**Solution:** Extract pure helper functions: `matchesHighQuality()`, `matchesLowQuality()`, `scoreExampleLength()`, `scoreQuoteLength()`, `scoreToQuality()`
+**Lesson:** Each loop, conditional, and nested block adds complexity - extract focused helper functions that each do one thing
+
+### 2026-01-23 - Useless Switch Case Before Default
+
+**Context:** Switch statement with `case "balanced":` immediately before `default:` with same body
+**Problem:** Biome's `noUselessSwitchCase` flagged redundant case
+**Solution:** Remove the explicit case when it has the same handling as default
+**Lesson:** If a case falls through to default with identical logic, just use default alone
+
+### 2026-01-23 - Namespace vs Named Imports for pdfjs-dist
+
+**Context:** Using `import * as pdfjsLib from "pdfjs-dist"` for PDF.js library
+**Problem:** Biome's `noNamespaceImport` rule flagged namespace import as harmful for tree-shaking
+**Solution:** Use named imports: `import { getDocument, GlobalWorkerOptions } from "pdfjs-dist"`
+**Lesson:** Prefer named imports even for libraries that commonly use namespace pattern - update call sites from `pdfjsLib.getDocument()` to `getDocument()`
+
+### 2026-01-23 - Async Functions Must Await
+
+**Context:** Functions marked `async` that just return synchronous values or iterate without awaiting
+**Problem:** Biome's `useAwait` rule requires async functions to have at least one await
+**Solution:** Remove `async` keyword if no awaiting needed, or convert return type to plain `Promise<T>` instead of async function
+**Lesson:** `async` is only needed when you actually `await` - returning a Promise from a sync function works the same

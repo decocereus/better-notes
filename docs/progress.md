@@ -8,6 +8,20 @@ Track completed work, current status, and next steps.
 **Goal:** Classify extracted content against theme hierarchy
 **Status:** 🔜 Ready to Start
 
+### Sprint 8-9 Committed (2026-01-23)
+
+Commit `c141ecd` pushed to main with 84 files changed (10,578 insertions, 1,525 deletions).
+
+**Lint fixes required before commit:**
+- Disabled `noBarrelFile` rule globally in biome.jsonc (barrel files are standard pattern in this codebase)
+- Moved regex patterns to top-level constants in quality.ts, essay-detector.ts, content-extractor.ts, ocr.ts
+- Refactored `calculateQuality` to reduce cognitive complexity (extracted helper functions)
+- Removed useless switch cases in extraction.ts prompt functions
+- Fixed async functions without await in signed-urls.ts, job-manager.ts
+- Converted namespace imports to named imports in pdf/stream.ts (pdfjs-dist)
+- Removed accidentally generated job-manager.js file
+- Added block statements where required by linter
+
 ### Completed in Sprint 9
 
 - [x] Essay boundary detection (lib/extraction/essay-detector.ts)
