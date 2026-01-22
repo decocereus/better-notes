@@ -18,3 +18,220 @@ Document discoveries, gotchas, and solutions encountered during development.
 ## Learnings Log
 
 <!-- Add new learnings below this line -->
+
+### 2026-01-22 - Next.js 16 Dynamic Route Params
+
+**Context:** Creating dynamic route pages like `/projects/[id]/page.tsx`
+**Problem:** TypeScript expected `params` to be a Promise in Next.js 16
+**Solution:** Use `params: Promise<{ id: string }>` and `await params` in the component
+**Lesson:** Next.js 16 changed params to be async - always await them
+
+### 2026-01-22 - Biome Import Sorting
+
+**Context:** Writing new components with imports
+**Problem:** Biome requires specific import order (external first, then internal)
+**Solution:** Run `bun run fix` to auto-sort, or structure imports as: lucide-react → next/* → @/* → relative
+**Lesson:** Let Biome auto-fix import order rather than fighting it manually
+
+### 2026-01-22 - Block Statements Preference
+
+**Context:** Writing conditional returns in getPageTitle function
+**Problem:** Biome prefers block statements `if (x) { return y; }` over inline `if (x) return y;`
+**Solution:** Wrap single-line if returns in braces
+**Lesson:** Always use braces for consistency, even for single-line conditionals
+
+### 2026-01-22 - Class Sorting in Tailwind
+
+**Context:** Writing className with multiple Tailwind classes
+**Problem:** Biome's useSortedClasses rule requires specific order (border-border before border-dashed)
+**Solution:** Run `bun run fix` to auto-sort classes
+**Lesson:** Let the linter sort classes - the order matters for specificity in some cases
+
+### 2026-01-22 - Server vs Client Components
+
+**Context:** Creating layout with interactive sidebar
+**Problem:** Can't use hooks (useState, usePathname) in Server Components
+**Solution:** Keep page.tsx as Server Components, extract interactive elements to separate client components
+**Lesson:** Pages = Server, Interactivity = Client components in /components folder
+
+### 2026-01-22 - useCallback Order with useEffect
+
+**Context:** Creating NotionConnector with testConnection callback used in useEffect
+**Problem:** Biome requires useCallback dependencies to be declared before useEffect that uses them
+**Solution:** Define useCallback BEFORE the useEffect that references it, add to dependency array
+**Lesson:** Hook order matters - define callbacks before effects that use them
+
+### 2026-01-22 - Async Functions That Return Promises
+
+**Context:** NotionClient methods like `search()` and `getPage()` that just return `this.request()`
+**Problem:** Biome warns "async function lacks await expression"
+**Solution:** Remove `async` keyword when just returning a Promise directly (no await needed)
+**Lesson:** Only use `async` when you actually `await` something - returning a Promise doesn't need it
+
+### 2026-01-22 - Class Properties in TypeScript
+
+**Context:** NotionAPIError class with `status` property
+**Problem:** Biome warns against parameter properties (`constructor(public status: number)`)
+**Solution:** Use explicit property declaration: `readonly status: number;` then assign in constructor
+**Lesson:** Prefer explicit class property declarations over TypeScript parameter properties
+
+### 2026-01-22 - Switch Statement Default Clause
+
+**Context:** Keyboard event handler in NotionPageSearch with switch on e.key
+**Problem:** Biome requires default clause in switch statements
+**Solution:** Add `default: break;` even when no action needed for other keys
+**Lesson:** Always include default clause in switch statements for completeness
+
+### 2026-01-22 - SSR-Safe localStorage Hook
+
+**Context:** Storing Notion API key in localStorage for persistence
+**Problem:** localStorage not available during SSR, causes hydration mismatch
+**Solution:** Create useLocalStorage hook that returns initial value during SSR, hydrates after mount
+**Lesson:** Always check `typeof window !== 'undefined'` or use effect for localStorage access
+
+### 2026-01-22 - Cognitive Complexity in Biome
+
+**Context:** Writing theme parser with nested conditionals for different block types
+**Problem:** Biome flagged excessive cognitive complexity (25, max is 15)
+**Solution:** Extract helper functions for block type checking, theme creation, and block handling
+**Lesson:** Break down complex parsing logic into small, focused helper functions
+
+### 2026-01-22 - Semantic HTML vs ARIA Roles
+
+**Context:** Creating clickable tree nodes in theme-tree component
+**Problem:** Biome warns against `div` with `role="button"` - suggests using actual `<button>`
+**Solution:** Replace divs with `<button type="button">` elements, add `w-full text-left` for styling
+**Lesson:** Prefer semantic HTML elements over ARIA roles when possible - better accessibility
+
+### 2026-01-22 - Nested Ternary Expressions
+
+**Context:** Mini theme chevron with multiple conditions (hasQuestions && isExpanded)
+**Problem:** Biome warns against nested ternary expressions
+**Solution:** Extract to a small dedicated component with if/else statements
+**Lesson:** Use small components or helper functions instead of nested ternaries for readability
+
+### 2026-01-22 - useCallback Dependencies with useEffect
+
+**Context:** fetchThemes callback used in useEffect for data fetching
+**Problem:** Need to include fetchThemes in useEffect dependencies, but it recreates on every render
+**Solution:** Define fetchThemes with useCallback, include all its dependencies, then add to useEffect deps
+**Lesson:** When callbacks are used in useEffect, wrap them in useCallback first
+
+### 2026-01-22 - Radix UI Dialog Export Issues
+
+**Context:** Creating dialog component using @radix-ui/react-dialog
+**Problem:** Biome flagged `noExportedImports` when re-exporting DialogClose from radix-ui
+**Solution:** Use `DialogPrimitive.Close` internally instead of re-exporting, only export what's actually used
+**Lesson:** Avoid re-exporting imports directly - use internally and create proper exports
+
+### 2026-01-22 - TypeScript Object Shape Consistency
+
+**Context:** STATUS_CONFIG object with different shapes per key (only 'processing' had 'animate')
+**Problem:** TypeScript error when accessing `statusConfig.animate` because not all variants had it
+**Solution:** Add `animate: false` to all status config variants for consistent shape
+**Lesson:** Keep object shapes consistent across all variants to avoid TypeScript errors
+
+### 2026-01-22 - Regex Test Data Validation
+
+**Context:** Writing tests for Notion page ID extraction
+**Problem:** Tests failing because test IDs had 33 chars instead of valid 32-char Notion IDs
+**Solution:** Counted characters carefully, fixed test data to use exactly 32 hex characters
+**Lesson:** Verify test data matches actual constraints - off-by-one errors are common with fixed-length IDs
+
+### 2026-01-22 - Bun Test vs Vitest
+
+**Context:** Running tests with `bun test`
+**Problem:** `bun test` uses Bun's native test runner, ignoring vitest.config.ts (environment: "jsdom")
+**Solution:** Use `bun run test` which runs the npm script that calls `vitest run`
+**Lesson:** `bun test` ≠ `bun run test` - use the npm script to respect vitest config
+
+### 2026-01-22 - localStorage Mock in Tests
+
+**Context:** Testing LocalStorage class that checks `typeof window === "undefined"`
+**Problem:** Tests failed because window was undefined in Node/Bun environment
+**Solution:** Mock both `global.window` and `global.localStorage` in test setup
+**Lesson:** When testing browser APIs, mock the full environment including window object
+
+### 2026-01-22 - Constants Organization Pattern
+
+**Context:** Adding upload-related constants (allowed MIME types, file size limits)
+**Problem:** CLAUDE.md requires all constants in `lib/constants/` but directory didn't exist
+**Solution:** Created `lib/constants/` with domain-specific files (upload.ts) and barrel export (index.ts)
+**Lesson:** Follow the established pattern: one file per domain, include type guards and utility functions with the constants they relate to
+
+### 2026-01-22 - Vercel Blob File Uploads
+
+**Context:** Implementing file upload to Vercel Blob storage
+**Problem:** Need to handle multipart form data and validate files before upload
+**Solution:** Use `request.formData()` in Next.js API route, validate MIME type with type guard, use `put()` from @vercel/blob
+**Lesson:** Vercel Blob requires BLOB_READ_WRITE_TOKEN env var - add specific error handling for this common misconfiguration
+
+### 2026-01-22 - Cognitive Complexity with Helper Functions
+
+**Context:** UploadZone component with complex processFiles and handleDeleteSource functions
+**Problem:** Biome flagged cognitive complexity over 15 (had 21-23)
+**Solution:** Extract pure helper functions outside the component: `validateFile()`, `createFileWithPreview()`, `cleanupPreviews()`, `shouldDeleteFromBlobStorage()`
+**Lesson:** Keep stateful logic in hooks/handlers, extract pure logic to helper functions - reduces complexity and improves testability
+
+### 2026-01-22 - Drag-and-Drop File Upload Accessibility
+
+**Context:** Creating drop zone for file uploads with both drag-drop and click-to-browse
+**Problem:** Biome warns about non-interactive elements with event handlers (noStaticElementInteractions, noNoninteractiveElementInteractions)
+**Solution:** Use biome-ignore comment explaining the pattern, or separate concerns (div for drop events, label/input for click)
+**Lesson:** Drop zones are a legitimate pattern but need biome-ignore comments to suppress accessibility warnings - document why the pattern is acceptable
+
+### 2026-01-22 - Next.js Image with Blob URLs
+
+**Context:** Showing image preview from `URL.createObjectURL()` blob URLs
+**Problem:** Using `<img>` triggers linter warnings about missing dimensions and preferring Next.js Image
+**Solution:** Use `<Image>` component with `unoptimized` prop (required for blob URLs), explicit width/height
+**Lesson:** Next.js Image works with blob URLs but needs `unoptimized` since it can't optimize local blob URLs
+
+### 2026-01-22 - Async Functions Without Await
+
+**Context:** Handler function marked `async` that calls synchronous functions
+**Problem:** Biome warns "async function lacks an await expression"
+**Solution:** Remove `async` keyword when all operations are synchronous
+**Lesson:** Only mark functions `async` when they actually await something - not just because they handle async operations elsewhere
+
+### 2026-01-23 - Vercel AI SDK 5.0+ maxOutputTokens
+
+**Context:** Using generateText from Vercel AI SDK to test LLM connections
+**Problem:** TypeScript error - `maxTokens` does not exist in type
+**Solution:** Use `maxOutputTokens` instead of `maxTokens` (renamed in AI SDK 5.0)
+**Lesson:** AI SDK 5.0 renamed maxTokens to maxOutputTokens for clarity - check migration guides when upgrading
+
+### 2026-01-23 - Cognitive Complexity with Error Pattern Matching
+
+**Context:** extractErrorMessage function with multiple if-statements for error patterns
+**Problem:** Biome flagged cognitive complexity of 17 (max is 15)
+**Solution:** Extract patterns to a const array, use helper function with for...of loop
+**Lesson:** When matching many patterns, use a data-driven approach (array of patterns) instead of multiple if-statements
+
+### 2026-01-23 - OpenRouter API Integration
+
+**Context:** Setting up LLM provider with OpenRouter via Vercel AI SDK
+**Problem:** Need to configure OpenRouter as the base URL while using OpenAI-compatible SDK
+**Solution:** Use createOpenAI with baseURL set to openrouter.ai/api/v1, add HTTP-Referer and X-Title headers
+**Lesson:** OpenRouter is OpenAI-compatible, so use @ai-sdk/openai with custom baseURL - no special provider needed
+
+### 2026-01-23 - Boolean Coercion for Optional Values
+
+**Context:** DashboardContent component checking if modelConfig exists and has keys
+**Problem:** TypeScript error: Type 'boolean | undefined' is not assignable to type 'boolean'
+**Solution:** Wrap expression in `Boolean()`: `Boolean(settings.modelConfig && Object.keys(settings.modelConfig).length > 0)`
+**Lesson:** When passing conditional expressions as boolean props, use `Boolean()` to ensure type safety
+
+### 2026-01-23 - Testing Loading Spinners Without role="status"
+
+**Context:** Testing components that show LoadingSpinner during loading state
+**Problem:** LoadingSpinner uses Lucide icon without `role="status"`, so `getByRole("status")` fails
+**Solution:** Use CSS class selector: `document.querySelector(".animate-spin")`
+**Lesson:** When testing for loading states, check the actual DOM structure first - icons may have `aria-hidden="true"`
+
+### 2026-01-23 - Component Composition for Dashboard
+
+**Context:** Building dashboard with multiple sections (stats, recent projects, quick actions)
+**Problem:** Need to share state across sections while keeping page as Server Component
+**Solution:** Create a DashboardContent client component that composes smaller components, each using hooks independently
+**Lesson:** Compose client components that each manage their own state - no need to lift all state to parent
