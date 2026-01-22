@@ -4,9 +4,80 @@ Track completed work, current status, and next steps.
 
 ## Current Sprint
 
-**Sprint:** Sprint 11 - Comparison & Gap Analysis
-**Goal:** Compare user content vs topper content, identify gaps and suggestions
+**Sprint:** Sprint 12 - Note Generation & Notion Sync
+**Goal:** Generate dual-section notes (Your Notes + Topper Insights) and sync to Notion
 **Status:** 🔜 Ready to Start
+
+### Sprint 11 Completed (2026-01-23)
+
+All Sprint 11 tasks completed and verified with typecheck and lint.
+
+**Completed Tasks:**
+- [x] 11.1: Create comparison types (types/comparison.ts)
+- [x] 11.2: Create comparison prompts (lib/llm/prompts/comparison.ts)
+- [x] 11.3: Create gap analyzer (lib/comparison/gap-analyzer.ts)
+- [x] 11.4: Create suggestion generator (lib/comparison/suggestions.ts)
+- [x] 11.5: Create compare API route (app/api/compare/route.ts)
+- [x] 11.6: Create comparison results component (components/comparison-results.tsx)
+- [x] 11.7: Create per-theme comparison page (app/themes/[id]/compare/page.tsx)
+- [x] 11.8: Create global comparison view (components/global-compare-content.tsx)
+
+**Lint fixes applied:**
+- Added helper function `calculateCoveragePercent()` to replace nested ternaries
+- Refactored `summarizeContentForPrompt()` into smaller functions: `formatItemFlags()`, `formatContentItem()`, `groupContentByType()`
+- Fixed `export from` pattern for re-exported constants
+- Extracted `getPriorityBadgeVariant()` and `ThemeResultCardStatus()` components to eliminate nested ternaries
+- Converted recursive polling to while-loop pattern for reduced complexity
+- Added block statements to all single-line if returns
+
+### Blocked
+
+- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
+
+---
+
+## Completed Work
+
+### Sprint 11 - Comparison & Gap Analysis (2026-01-23) - Completed
+
+**Demo:** User content can be compared against topper content per theme. Gap analysis identifies what content types, example categories, or quality levels the user is missing. Suggestions are generated with actionable improvement recommendations. Results display with coverage charts, gap severity badges, and expandable details.
+
+**Files Created:**
+- `types/comparison.ts` - Types for comparison results, gaps, suggestions, coverage stats
+- `lib/llm/prompts/comparison.ts` - System prompts for gap analysis and readiness assessment
+- `lib/llm/schemas/comparison.ts` - Zod schemas for structured comparison output
+- `lib/comparison/gap-analyzer.ts` - Core gap analysis with LLM and statistical fallback
+- `lib/comparison/suggestions.ts` - Suggestion generation based on gaps
+- `lib/comparison/index.ts` - Barrel export for comparison module
+- `app/api/compare/route.ts` - POST to start comparison job, GET for status/results
+- `components/comparison-results.tsx` - Coverage charts, gaps list, suggestions display
+- `components/theme-compare-content.tsx` - Per-theme comparison UI with job controls
+- `components/global-compare-content.tsx` - Global comparison across all themes
+- `app/themes/[id]/compare/page.tsx` - Per-theme comparison page
+- `app/compare/page.tsx` - Global comparison page (updated)
+
+**Files Modified:**
+- `types/processing.ts` - Added "comparison" to ProcessingJobType
+
+**Key Features:**
+- Gap analysis using Claude Sonnet via structured output
+- Coverage statistics by content type and example category
+- Gap severity levels: high, medium, low
+- Suggestion types: add (new content), improve (quality), diversify (categories)
+- LLM-generated reasoning for gaps and suggestions
+- Fallback to statistical gap analysis if LLM fails
+- Score calculation with configurable weights (coverage, quality, diversity)
+- Global comparison runs all themes sequentially
+- Export comparison report as JSON
+- Expandable gap and suggestion items with reference content
+
+**Architecture:**
+- Uses Vercel AI SDK `generateObject` with Zod schemas for type-safe LLM output
+- Comparison jobs stored in `processing/{jobId}/comparison-results.json`
+- Polling-based job status with configurable timeout
+- Classification job ID stored in localStorage for cross-page access
+
+---
 
 ### Sprint 10 Completed (2026-01-23)
 

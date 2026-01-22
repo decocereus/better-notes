@@ -410,3 +410,31 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** TypeScript error "has no exported member 'PYQ'" - the type was actually named `EssayQuestion`
 **Solution:** Check actual export name in types file, use correct name
 **Lesson:** Always verify the actual export name rather than assuming based on comments or domain knowledge
+
+### 2026-01-23 - Helper Functions for Coverage Calculations
+
+**Context:** Calculating coverage percentages with multiple conditions (topperCount > 0, userCount > 0)
+**Problem:** Nested ternary `topperCount > 0 ? ... : userCount > 0 ? 100 : 0` flagged by linter
+**Solution:** Extract to `calculateCoveragePercent(userCount, topperCount)` helper function with if statements
+**Lesson:** When the same calculation appears multiple times, extracting to a helper function both satisfies the linter and reduces duplication
+
+### 2026-01-23 - export from vs Re-export Pattern
+
+**Context:** Importing `DEFAULT_SCORING_CONFIG` from types and re-exporting from gap-analyzer
+**Problem:** Biome's `noExportedImports` rule flagged importing then exporting as problematic
+**Solution:** Use `export { DEFAULT_SCORING_CONFIG } from "@/types/comparison"` syntax instead of import + export
+**Lesson:** When re-exporting, use the single-line `export from` syntax - it's cleaner and satisfies linters
+
+### 2026-01-23 - While-Loop vs Recursive setTimeout for Polling
+
+**Context:** Polling for job completion with recursive `setTimeout(poll, 1000)` inside async function
+**Problem:** Cognitive complexity increased due to nested async callback and try/catch
+**Solution:** Convert to `while (attempts < maxAttempts)` loop with `await new Promise(r => setTimeout(r, 1000))`
+**Lesson:** While-loop polling is simpler than recursive setTimeout - easier to reason about, lower complexity, and easier to add timeout limits
+
+### 2026-01-23 - useCallback Dependency Order Matters
+
+**Context:** `startComparison` useCallback called `pollComparisonResults` but was defined before it
+**Problem:** Biome's exhaustive-deps rule required `pollComparisonResults` in dependency array
+**Solution:** Move `pollComparisonResults` definition BEFORE `startComparison`, then add to its dependency array
+**Lesson:** When useCallback A calls useCallback B, define B first - dependency order follows call order

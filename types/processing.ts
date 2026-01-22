@@ -1,12 +1,16 @@
 /**
- * Types for processing jobs (OCR, extraction, classification).
+ * Types for processing jobs (OCR, extraction, classification, comparison).
  * Used to track long-running background tasks.
  */
 
 /**
  * Types of processing jobs.
  */
-export type ProcessingJobType = "ocr" | "extraction" | "classification";
+export type ProcessingJobType =
+	| "ocr"
+	| "extraction"
+	| "classification"
+	| "comparison";
 
 /**
  * Status of a processing job.

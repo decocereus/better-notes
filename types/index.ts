@@ -3,6 +3,22 @@
  * Import types from '@/types' for clean imports.
  */
 
+// Comparison types (Sprint 11)
+export type {
+	ComparisonSuggestion,
+	ComparisonSummary,
+	ContentGap,
+	CoverageStat,
+	ExampleCategoryCoverage,
+	GapSeverity,
+	QualityComparison,
+	ScoringConfig,
+	SourceGroupedContent,
+	StartComparisonInput,
+	SuggestionType,
+	ThemeComparisonResult,
+} from "./comparison";
+export { DEFAULT_SCORING_CONFIG } from "./comparison";
 // Content types
 export type {
 	ComparisonResult,

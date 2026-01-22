@@ -18,6 +18,8 @@ export const MODELS = {
 	EXTRACTION: "anthropic/claude-sonnet-4",
 	/** Claude Haiku - Fast and cheap for classification tasks */
 	CLASSIFICATION: "anthropic/claude-3-5-haiku",
+	/** Claude Sonnet - High quality for comparison and gap analysis */
+	COMPARISON: "anthropic/claude-sonnet-4",
 	/** Claude Haiku - Fast and cheap for simple tasks */
 	SIMPLE: "anthropic/claude-3-5-haiku",
 } as const;
