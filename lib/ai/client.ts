@@ -14,8 +14,10 @@ import { env } from "@/lib/env";
 export const MODELS = {
 	/** Gemini Flash 2.0 - Fast, good for OCR and bulk processing */
 	OCR: "google/gemini-2.0-flash-001",
-	/** Claude Sonnet - High quality for extraction and classification */
+	/** Claude Sonnet - High quality for extraction and analysis */
 	EXTRACTION: "anthropic/claude-sonnet-4",
+	/** Claude Haiku - Fast and cheap for classification tasks */
+	CLASSIFICATION: "anthropic/claude-3-5-haiku",
 	/** Claude Haiku - Fast and cheap for simple tasks */
 	SIMPLE: "anthropic/claude-3-5-haiku",
 } as const;

@@ -4,44 +4,34 @@ Track completed work, current status, and next steps.
 
 ## Current Sprint
 
-**Sprint:** Sprint 10 - Theme Classification
-**Goal:** Classify extracted content against theme hierarchy
+**Sprint:** Sprint 11 - Comparison & Gap Analysis
+**Goal:** Compare user content vs topper content, identify gaps and suggestions
 **Status:** 🔜 Ready to Start
 
-### Sprint 8-9 Committed (2026-01-23)
+### Sprint 10 Completed (2026-01-23)
 
-Commit `c141ecd` pushed to main with 84 files changed (10,578 insertions, 1,525 deletions).
+All Sprint 10 tasks completed and verified with typecheck and lint.
 
-**Lint fixes required before commit:**
-- Disabled `noBarrelFile` rule globally in biome.jsonc (barrel files are standard pattern in this codebase)
-- Moved regex patterns to top-level constants in quality.ts, essay-detector.ts, content-extractor.ts, ocr.ts
-- Refactored `calculateQuality` to reduce cognitive complexity (extracted helper functions)
-- Removed useless switch cases in extraction.ts prompt functions
-- Fixed async functions without await in signed-urls.ts, job-manager.ts
-- Converted namespace imports to named imports in pdf/stream.ts (pdfjs-dist)
-- Removed accidentally generated job-manager.js file
-- Added block statements where required by linter
+**Completed Tasks:**
+- [x] 10.1: Create classification prompts (lib/llm/prompts/classification.ts)
+- [x] 10.2: Create classification schemas (lib/llm/schemas/classification.ts)
+- [x] 10.3: Create classifier (lib/classification/classifier.ts)
+- [x] 10.4: Create cross-theme handler (lib/classification/cross-theme.ts)
+- [x] 10.5: Create content aggregator (lib/classification/aggregator.ts)
+- [x] 10.6: Create user content fetcher (lib/notion/content-fetcher.ts)
+- [x] 10.7: Create classify API route (app/api/classify/route.ts)
+- [x] 10.8: Create classification review component (components/classification-review.tsx)
+- [x] 10.9: Create theme content view (components/theme-detail-content.tsx)
+- [x] 10.10: Integrate classification into workflow (components/classification-workflow.tsx)
 
-### Completed in Sprint 9
-
-- [x] Essay boundary detection (lib/extraction/essay-detector.ts)
-- [x] Extraction prompts with category-specific guidance (lib/llm/prompts/extraction.ts)
-- [x] Zod schemas for structured LLM output (lib/llm/schemas/extraction.ts)
-- [x] Content extractor with batch processing (lib/extraction/content-extractor.ts)
-- [x] Quality scoring and overused example detection (lib/extraction/quality.ts)
-- [x] Extraction API route (app/api/extract/route.ts)
-- [x] Extraction parameters UI (components/parameters-content.tsx)
-- [x] Extracted content browser with filtering (components/extracted-content-browser.tsx)
-- [x] Patterns page integration (components/patterns-content.tsx)
-- [x] Settings hook updated for extraction parameters
-
-### Pending for Sprint 10
-
-- [ ] 10.1: Create Theme Classification Module
-- [ ] 10.2: Cross-theme content handling
-- [ ] 10.3: User content extraction (from notes)
-- [ ] 10.4: Content review UI
-- [ ] 10.5: Manual classification override
+**Lint fixes applied:**
+- Added default case to switch statements in aggregator.ts
+- Removed unused variable `aggregatedIds` in aggregator.ts
+- Changed async function to sync returning Promise in classifier.ts
+- Moved regex patterns to top-level constants in content-fetcher.ts
+- Extracted helper functions to reduce cognitive complexity (getStatusBgColor, getStatusTitle, getRelevanceColor, etc.)
+- Replaced nested ternaries with helper functions
+- Fixed non-null assertions with proper null checks
 
 ### Blocked
 
@@ -50,6 +40,46 @@ Commit `c141ecd` pushed to main with 84 files changed (10,578 insertions, 1,525 
 ---
 
 ## Completed Work
+
+### Sprint 10 - Theme Classification (2026-01-23) - Completed
+
+**Demo:** Extracted content from topper essays can be classified against a theme hierarchy fetched from Notion. Classification uses LLM to match content to relevant themes based on semantic similarity. Cross-theme content (appearing in 3+ themes) is flagged for multi-use. Content can be browsed by theme with filtering and search.
+
+**Files Created:**
+- `lib/llm/prompts/classification.ts` - System prompts and user prompts for classification
+- `lib/llm/schemas/classification.ts` - Zod schemas for structured classification output
+- `lib/classification/classifier.ts` - Main classifier with batch processing and relevance scoring
+- `lib/classification/cross-theme.ts` - Cross-theme content analysis and multi-use flagging
+- `lib/classification/aggregator.ts` - Aggregates content by theme with statistics
+- `lib/classification/index.ts` - Barrel export for classification module
+- `lib/notion/content-fetcher.ts` - Fetches user content from Notion for classification
+- `app/api/classify/route.ts` - POST to start classification job, GET for status/results
+- `components/classification-review.tsx` - Filter and browse classified content by theme
+- `components/classification-workflow.tsx` - Workflow component for triggering classification
+- `components/theme-detail-content.tsx` - Theme detail view with classified content
+
+**Files Modified:**
+- `lib/ai/client.ts` - Added CLASSIFICATION model type
+- `app/themes/[id]/page.tsx` - Uses ThemeDetailContent component
+
+**Key Features:**
+- Theme classification using Claude Haiku via structured output
+- Relevance scoring (0-1 scale, threshold 0.5)
+- Cross-theme content detection (content in 3+ themes flagged as multi-use)
+- Content aggregation per theme with type breakdown (introductions, examples, quotes, etc.)
+- Classification statistics (total classified, unclassified, multi-theme count, average mappings)
+- Filtering by theme, relevance score, content type
+- Search across classified content
+- Collapsible content sections by type
+- Background job processing with progress tracking
+
+**Architecture:**
+- Uses Vercel AI SDK `generateObject` with Zod schemas for type-safe LLM output
+- Batch classification (MAX_BATCH_SIZE = 10) for efficiency
+- Classification results stored in `processing/{jobId}/classification-results.json`
+- Theme hierarchy: MainTheme → MiniTheme → Questions
+
+---
 
 ### Sprint 9 - Content Extraction Engine (2026-01-23) - Completed
 

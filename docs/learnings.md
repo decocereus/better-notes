@@ -382,3 +382,31 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** Biome's `useAwait` rule requires async functions to have at least one await
 **Solution:** Remove `async` keyword if no awaiting needed, or convert return type to plain `Promise<T>` instead of async function
 **Lesson:** `async` is only needed when you actually `await` - returning a Promise from a sync function works the same
+
+### 2026-01-23 - z.record() Requires Two Arguments in Zod
+
+**Context:** Creating Zod schema for classification results with `byContentType: z.record(z.number())`
+**Problem:** TypeScript error "Expected 2-3 arguments, but got 1"
+**Solution:** Use `z.record(z.string(), z.number())` - first arg is key type, second is value type
+**Lesson:** Unlike TypeScript `Record<string, T>`, Zod's `z.record()` requires explicit key and value schemas
+
+### 2026-01-23 - Extracting Helper Functions for Cognitive Complexity
+
+**Context:** Large component with multiple state checks, conditionals, and nested ternaries
+**Problem:** Biome flagged cognitive complexity of 32 (max 15)
+**Solution:** Extract helper functions like `getStatusBgColor()`, `getStatusTitle()`, `getRelevanceColor()` that encapsulate conditionals
+**Lesson:** Each conditional adds complexity - extracting them to named functions both reduces measured complexity and improves readability
+
+### 2026-01-23 - Helper Functions Instead of Nested Ternaries
+
+**Context:** Status-based styling needed different colors for completed/failed/processing states
+**Problem:** Nested ternary like `status === "completed" ? "bg-green" : status === "failed" ? "bg-red" : "bg-blue"`
+**Solution:** Extract to a helper function with if statements that returns the appropriate class
+**Lesson:** Replace nested ternaries with simple helper functions - more readable and satisfies linter
+
+### 2026-01-23 - Type Aliases May Differ From Exports
+
+**Context:** Using `PYQ` type imported from types/theme
+**Problem:** TypeScript error "has no exported member 'PYQ'" - the type was actually named `EssayQuestion`
+**Solution:** Check actual export name in types file, use correct name
+**Lesson:** Always verify the actual export name rather than assuming based on comments or domain knowledge
