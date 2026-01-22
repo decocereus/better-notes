@@ -4,10 +4,11 @@
 
 import { NextResponse } from "next/server";
 import { NotionClient } from "@/lib/notion/client";
+import { getNotionApiKey } from "@/lib/notion/config";
 import { getThemeStats, parseThemePage } from "@/lib/notion/theme-parser";
 
 interface ThemesRequestBody {
-	apiKey: string;
+	apiKey?: string;
 	pageId: string;
 }
 
@@ -19,7 +20,7 @@ interface ThemesRequestBody {
 export function GET() {
 	return NextResponse.json(
 		{
-			error: "Use POST method with apiKey and pageId in body",
+			error: "Use POST method with pageId in body",
 		},
 		{ status: 405 }
 	);
@@ -28,19 +29,24 @@ export function GET() {
 /**
  * POST /api/themes
  * Fetches and parses themes from a Notion page.
+ * Uses NOTION_API_KEY env variable if set, otherwise uses apiKey from request body.
  *
- * Body: { apiKey: string, pageId: string }
+ * Body: { apiKey?: string, pageId: string }
  * Returns: { themes, pageTitle, parsedAt, stats }
  */
 export async function POST(request: Request) {
 	try {
 		const body = (await request.json()) as ThemesRequestBody;
-		const { apiKey, pageId } = body;
+		const { pageId } = body;
+		const apiKey = getNotionApiKey(body.apiKey);
 
 		// Validate required fields
 		if (!apiKey) {
 			return NextResponse.json(
-				{ error: "API key is required" },
+				{
+					error:
+						"No API key configured. Set NOTION_API_KEY environment variable or provide apiKey in request.",
+				},
 				{ status: 400 }
 			);
 		}

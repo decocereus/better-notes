@@ -19,6 +19,34 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-23 - File vs Directory Module Conflict
+
+**Context:** Created lib/storage/ directory with index.ts for R2 module
+**Problem:** TypeScript/Turbopack kept finding the wrong exports - turns out lib/storage.ts (file) and lib/storage/ (directory) both existed
+**Solution:** Renamed lib/storage.ts to lib/local-storage.ts
+**Lesson:** When creating a new module directory, check for existing files with the same name - the file takes precedence over the directory/index.ts
+
+### 2026-01-23 - Upload Progress Tracking
+
+**Context:** Implementing direct browser-to-R2 uploads for large files
+**Problem:** fetch() API doesn't support upload progress events
+**Solution:** Use XMLHttpRequest with xhr.upload.addEventListener('progress')
+**Lesson:** For features requiring upload progress, XMLHttpRequest is still the way to go despite fetch being more modern
+
+### 2026-01-23 - R2 Signed URLs with S3 SDK
+
+**Context:** Setting up Cloudflare R2 storage
+**Problem:** R2 uses S3-compatible API but with different endpoint format
+**Solution:** Use @aws-sdk/client-s3 with region: "auto" and the R2 endpoint URL
+**Lesson:** R2 works seamlessly with AWS S3 SDK - just configure endpoint to your R2 bucket URL
+
+### 2026-01-23 - AI SDK Message Format
+
+**Context:** Using AI SDK generateText for OCR with vision
+**Problem:** Initial attempts with maxTokens caused TypeScript errors
+**Solution:** The messages format with multimodal content works without explicit maxTokens
+**Lesson:** AI SDK handles model-specific defaults - don't need to specify maxTokens unless required
+
 ### 2026-01-22 - Next.js 16 Dynamic Route Params
 
 **Context:** Creating dynamic route pages like `/projects/[id]/page.tsx`
@@ -235,3 +263,80 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Problem:** Need to share state across sections while keeping page as Server Component
 **Solution:** Create a DashboardContent client component that composes smaller components, each using hooks independently
 **Lesson:** Compose client components that each manage their own state - no need to lift all state to parent
+
+### 2026-01-23 - useLocalStorage Stale Closure Bug
+
+**Context:** Settings not persisting after page refresh despite localStorage having correct data
+**Problem:** `useLocalStorage` hook's `setValue` used `storedValue` from closure which could be stale
+**Solution:** Use functional state update: `setStoredValue((prev) => ...)` to get latest state from React
+**Lesson:** When a callback in useCallback needs current state, use functional updates instead of depending on state variables in closure - prevents stale closure bugs
+
+### 2026-01-23 - Hook Declaration Order in Components
+
+**Context:** `testConnection` useCallback used in useEffect dependency array
+**Problem:** TypeScript error "used before declaration" when useEffect with testConnection dependency was defined before testConnection
+**Solution:** Reorder hooks so useCallback is defined BEFORE the useEffect that uses it
+**Lesson:** Hook declaration order matters - define callbacks before effects that depend on them
+
+### 2026-01-23 - localStorage Cannot Be Accessed from API Routes
+
+**Context:** Project creation showed "project not found" error after creating a project
+**Problem:** API routes in Next.js run on the server - localStorage is only available in the browser
+**Solution:** Migrated data layer from localStorage + API routes to Convex (real-time database)
+**Lesson:** Server-side code cannot access browser APIs - use a proper database for data that needs to be accessed from both client and server
+
+### 2026-01-23 - Convex Generated Types Setup
+
+**Context:** Setting up Convex with existing codebase before running `bunx convex dev`
+**Problem:** TypeScript errors for missing `@/convex/_generated/api` module
+**Solution:** Create placeholder files in `convex/_generated/` with basic type exports, then run `bunx convex dev` to generate real types
+**Lesson:** Convex generates types automatically but you need to run `bunx convex dev` first - can create placeholders for initial development
+
+### 2026-01-23 - Convex useQuery Return Types
+
+**Context:** Using `useQuery(api.projects.list)` to fetch projects
+**Problem:** Return type is `unknown` because Convex types are generic
+**Solution:** Cast result to expected type: `useQuery(api.projects.list) as Project[] | undefined`
+**Lesson:** Convex queries return unknown by default - use type assertions matching your schema
+
+### 2026-01-23 - Excluding Convex from TypeScript Strict Mode
+
+**Context:** Convex functions in `convex/*.ts` causing implicit any errors
+**Problem:** Convex's `ctx` and `args` parameters don't have explicit types in handler functions
+**Solution:** Add `"convex/*.ts"` to `tsconfig.json` exclude array - Convex has its own `convex/tsconfig.json`
+**Lesson:** Convex backend files should be excluded from main tsconfig - they use their own TypeScript configuration
+
+### 2026-01-23 - Convex FunctionReference for Queries Without Arguments
+
+**Context:** `useQuery(api.projects.list)` with no arguments
+**Problem:** TypeScript error "Expected 2 arguments, but got 1"
+**Solution:** Define query type with `Record<string, never>` for args: `FunctionReference<"query", "public", Record<string, never>, unknown>`
+**Lesson:** Use `Record<string, never>` (not `object` or `{}`) for Convex queries that take no arguments
+
+### 2026-01-23 - Vercel AI SDK generateObject for Structured Extraction
+
+**Context:** Extracting structured content from essays using LLM
+**Problem:** Need type-safe structured output from LLM (not just text)
+**Solution:** Use `generateObject` from `ai` package with Zod schema - it validates and returns typed object
+**Lesson:** `generateObject({ model, schema, system, prompt })` is the pattern for structured LLM output - define schema with Zod
+
+### 2026-01-23 - Cognitive Complexity with Filter Functions
+
+**Context:** Content browser with multiple filter conditions in useMemo
+**Problem:** Biome flagged cognitive complexity of 35 (max 15) due to nested conditionals in filter function
+**Solution:** Extract filter logic into separate pure functions - `matchesSearch()` for search matching, `matchesFilters()` for full filter check
+**Lesson:** When filtering with many conditions, extract each condition check to a named function - reduces complexity and improves readability
+
+### 2026-01-23 - confirm() Not Allowed by Linter
+
+**Context:** Adding "Clear All" button with confirmation
+**Problem:** Biome lint rule `noAlert` disallows `confirm()` (and `alert()`) calls
+**Solution:** Use AlertDialog component from shadcn/ui with controlled state instead of native confirm
+**Lesson:** Native browser dialogs (alert, confirm, prompt) are discouraged - use accessible dialog components instead
+
+### 2026-01-23 - Unused Imports Removed by Linter
+
+**Context:** Adding imports for AlertDialog but not using them in JSX yet
+**Problem:** Biome auto-removes unused imports on save/fix
+**Solution:** Add both the import AND the usage in the same edit, or disable auto-fix while working
+**Lesson:** When refactoring to use new components, add both import and usage together to avoid linter removing the import

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation, useQuery } from "convex/react";
 import { CheckCircle2, FileImage, FileText } from "lucide-react";
 import { useState } from "react";
 import type { UploadResponse } from "@/app/api/upload/route";
@@ -12,8 +13,10 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { UploadZone } from "@/components/upload-zone";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
-import { useProjects } from "@/lib/hooks/use-projects";
+import type { Project } from "@/types/project";
 
 interface UploadedFile {
 	response: UploadResponse;
@@ -21,12 +24,13 @@ interface UploadedFile {
 }
 
 export function UploadContent() {
-	const { projects, isHydrated, addSource } = useProjects();
+	const projects = useQuery(api.projects.list) as Project[] | undefined;
+	const addSource = useMutation(api.projects.addSource);
 	const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 	const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 	const [error, setError] = useState<string | null>(null);
 
-	const handleUploadComplete = (response: UploadResponse) => {
+	const handleUploadComplete = async (response: UploadResponse) => {
 		const newUpload: UploadedFile = {
 			response,
 			addedToProject: false,
@@ -40,15 +44,14 @@ export function UploadContent() {
 						response.type as keyof typeof MIME_TO_SOURCE_TYPE
 					] || "image";
 
-				const source = addSource(selectedProjectId, {
-					type: sourceType,
+				await addSource({
+					projectId: selectedProjectId as Id<"projects">,
+					type: sourceType as "pdf" | "image",
 					reference: response.url,
 					name: response.filename,
 				});
 
-				if (source) {
-					newUpload.addedToProject = true;
-				}
+				newUpload.addedToProject = true;
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : "Failed to add file to project"
@@ -91,12 +94,11 @@ export function UploadContent() {
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="">No project</SelectItem>
-							{isHydrated &&
-								projects.map((project) => (
-									<SelectItem key={project.id} value={project.id}>
-										{project.name}
-									</SelectItem>
-								))}
+							{projects?.map((project) => (
+								<SelectItem key={project.id} value={project.id}>
+									{project.name}
+								</SelectItem>
+							))}
 						</SelectContent>
 					</Select>
 				</div>

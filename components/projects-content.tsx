@@ -1,8 +1,9 @@
 "use client";
 
-import { Plus, RefreshCw } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 import {
@@ -18,42 +19,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import type { Project } from "@/types/project";
 
 export function ProjectsContent() {
 	const router = useRouter();
-	const [projects, setProjects] = useState<Project[]>([]);
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const projects = useQuery(api.projects.list) as Project[] | undefined;
+	const removeProject = useMutation(api.projects.remove);
+
 	const [deleteId, setDeleteId] = useState<string | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
-	const fetchProjects = useCallback(async () => {
-		try {
-			setIsLoading(true);
-			setError(null);
-
-			const response = await fetch("/api/projects");
-			if (!response.ok) {
-				throw new Error("Failed to fetch projects");
-			}
-
-			const data = (await response.json()) as { projects: Project[] };
-			setProjects(data.projects);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to load projects");
-		} finally {
-			setIsLoading(false);
-		}
-	}, []);
-
-	useEffect(() => {
-		fetchProjects();
-	}, [fetchProjects]);
-
-	const handleProjectCreated = (project: Project) => {
-		// Navigate to the new project
-		router.push(`/projects/${project.id}`);
+	const handleProjectCreated = (projectId: string) => {
+		router.push(`/projects/${projectId}`);
 	};
 
 	const handleDeleteRequest = (id: string) => {
@@ -66,29 +46,24 @@ export function ProjectsContent() {
 		}
 
 		setIsDeleting(true);
+		setError(null);
+
 		try {
-			const response = await fetch(`/api/projects/${deleteId}`, {
-				method: "DELETE",
-			});
-
-			if (!response.ok) {
-				throw new Error("Failed to delete project");
-			}
-
-			setProjects((prev) => prev.filter((p) => p.id !== deleteId));
+			await removeProject({ id: deleteId as Id<"projects"> });
+			setDeleteId(null);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to delete project");
 		} finally {
 			setIsDeleting(false);
-			setDeleteId(null);
 		}
 	};
 
 	const projectToDelete = deleteId
-		? projects.find((p) => p.id === deleteId)
+		? projects?.find((p) => p.id === deleteId)
 		: null;
 
-	if (isLoading) {
+	// Loading state
+	if (projects === undefined) {
 		return (
 			<div className="flex items-center justify-center py-12">
 				<LoadingSpinner size="lg" />
@@ -107,10 +82,6 @@ export function ProjectsContent() {
 					</p>
 				</div>
 				<div className="flex items-center gap-2">
-					<Button onClick={fetchProjects} size="icon" variant="outline">
-						<RefreshCw className="size-4" />
-						<span className="sr-only">Refresh</span>
-					</Button>
 					<CreateProjectDialog
 						onProjectCreated={handleProjectCreated}
 						trigger={
@@ -157,7 +128,14 @@ export function ProjectsContent() {
 						<ProjectCard
 							key={project.id}
 							onDelete={handleDeleteRequest}
-							project={project}
+							project={{
+								id: project.id,
+								name: project.name,
+								description: project.description,
+								createdAt: project.createdAt,
+								updatedAt: project.updatedAt,
+								sources: project.sources,
+							}}
 						/>
 					))}
 				</div>

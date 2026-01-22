@@ -4,32 +4,240 @@ Track completed work, current status, and next steps.
 
 ## Current Sprint
 
-**Sprint:** Sprint 7 - Dashboard & Overview (Foundation Complete)
-**Goal:** Build functional dashboard showing overview of all data
-**Status:** ✅ Completed
+**Sprint:** Sprint 10 - Theme Classification
+**Goal:** Classify extracted content against theme hierarchy
+**Status:** 🔜 Ready to Start
 
-### Completed
+### Completed in Sprint 9
 
-- [x] Task 7.1: Create Dashboard Stats Component (components/dashboard-stats.tsx)
-- [x] Task 7.2: Create Recent Projects Component (components/recent-projects.tsx)
-- [x] Task 7.3: Create Quick Actions Component (components/quick-actions.tsx)
-- [x] Task 7.4: Build Dashboard Page (app/page.tsx, components/dashboard-content.tsx)
+- [x] Essay boundary detection (lib/extraction/essay-detector.ts)
+- [x] Extraction prompts with category-specific guidance (lib/llm/prompts/extraction.ts)
+- [x] Zod schemas for structured LLM output (lib/llm/schemas/extraction.ts)
+- [x] Content extractor with batch processing (lib/extraction/content-extractor.ts)
+- [x] Quality scoring and overused example detection (lib/extraction/quality.ts)
+- [x] Extraction API route (app/api/extract/route.ts)
+- [x] Extraction parameters UI (components/parameters-content.tsx)
+- [x] Extracted content browser with filtering (components/extracted-content-browser.tsx)
+- [x] Patterns page integration (components/patterns-content.tsx)
+- [x] Settings hook updated for extraction parameters
 
-### In Progress
+### Pending for Sprint 10
 
-- None
-
-### Pending
-
-- None (Foundation sprints complete!)
+- [ ] 10.1: Create Theme Classification Module
+- [ ] 10.2: Cross-theme content handling
+- [ ] 10.3: User content extraction (from notes)
+- [ ] 10.4: Content review UI
+- [ ] 10.5: Manual classification override
 
 ### Blocked
 
-- Sprints 8-12 require strategy document from user
+- Build error in OCR route due to DOMMatrix (pdf.js SSR issue) - pre-existing from Sprint 8
 
 ---
 
 ## Completed Work
+
+### Sprint 9 - Content Extraction Engine (2026-01-23) - Completed
+
+**Demo:** The extraction engine can detect essay boundaries in OCR'd PDFs, extract structured content (introductions, conclusions, examples, quotes, thinkers, arguments, books/poems, keywords) using LLM, score content quality, and flag overused examples.
+
+**Files Created:**
+- `lib/extraction/essay-detector.ts` - Detects essay boundaries in multi-page PDFs using LLM
+- `lib/extraction/content-extractor.ts` - Main extraction logic with batch processing
+- `lib/extraction/quality.ts` - Quality scoring, multi-use assessment, overused detection
+- `lib/extraction/index.ts` - Barrel export for extraction module
+- `lib/llm/prompts/extraction.ts` - System prompts and dynamic extraction prompts
+- `lib/llm/schemas/extraction.ts` - Zod schemas for structured LLM extraction output
+- `app/api/extract/route.ts` - POST to start extraction job, GET for status/results
+- `components/extracted-content-browser.tsx` - Filter and browse extracted content
+- `components/patterns-content.tsx` - Patterns page with extraction integration
+
+**Files Modified:**
+- `lib/hooks/use-settings.ts` - Added extractionParameters to AppSettings
+- `components/parameters-content.tsx` - Full extraction parameters configuration UI
+- `app/patterns/page.tsx` - Uses PatternsContent client component
+
+**Key Features:**
+- Essay boundary detection using Claude Sonnet via structured output
+- Content extraction with 8 content types and 11 example categories
+- Quality scoring (high/medium/low) based on content patterns
+- Overused example detection with customizable list
+- Multi-use content flagging for cross-theme applicability
+- Filtering by type, quality, category, overused status
+- Stats summary (total, high quality, multi-use, overused counts)
+- Collapsible groups by content type
+
+**Architecture:**
+- Uses Vercel AI SDK `generateObject` with Zod schemas for type-safe LLM output
+- Background processing with job persistence in R2
+- Extraction results stored in `processing/{jobId}/extraction-results.json`
+- Local state for extracted items with localStorage persistence
+
+**Dependencies:**
+- Existing: ai, zod, @ai-sdk/openai
+
+---
+
+### Database Migration - Convex Integration (2026-01-23) - Completed
+
+**Problem:** Projects created in the app showed "Project Not Found" after creation.
+
+**Root Cause:** The architecture was fundamentally broken - projects were saved to `localStorage` on the client, but API routes (which run on the server) tried to read from `localStorage` which doesn't exist server-side.
+
+**Solution:** Migrated from localStorage to Convex database for proper client-server data persistence.
+
+**Files Created:**
+- `convex/schema.ts` - Database schema with tables for projects, contentSources, settings
+- `convex/projects.ts` - Queries and mutations for project CRUD operations
+- `convex/settings.ts` - Queries and mutations for settings storage
+- `components/convex-client-provider.tsx` - ConvexProvider wrapper component
+
+**Files Modified:**
+- `app/layout.tsx` - Added ConvexClientProvider
+- `components/projects-content.tsx` - Migrated to Convex useQuery/useMutation
+- `components/project-detail-content.tsx` - Migrated to Convex
+- `components/create-project-dialog.tsx` - Migrated to Convex
+- `components/add-source-dialog.tsx` - Migrated to Convex
+- `components/recent-projects.tsx` - Migrated to Convex
+- `components/dashboard-stats.tsx` - Migrated to Convex
+- `components/upload-content.tsx` - Migrated to Convex
+- `components/__tests__/*.tsx` - Updated to mock Convex instead of localStorage hooks
+- `tsconfig.json` - Excluded convex/*.ts from strict checking
+
+**Files Removed:**
+- `app/api/projects/` - Old localStorage-based API routes
+- `lib/hooks/use-projects.ts` - Old localStorage hook
+
+**Key Features:**
+- Real-time data sync via Convex subscriptions
+- Type-safe queries and mutations
+- Normalized data model (projects and contentSources as separate tables)
+- Indexes for efficient queries (by_updated, by_project, by_key)
+- Cascading deletes (sources deleted with projects)
+
+**Setup Required:**
+1. Run `bunx convex dev` to connect to Convex account
+2. Add `NEXT_PUBLIC_CONVEX_URL` to `.env.local`
+
+---
+
+### Sprint 8 - PDF Processing & OCR Infrastructure (2026-01-23) - Completed
+
+**Demo:** Large PDF files (up to 190MB) can be uploaded directly to Cloudflare R2 with progress tracking. OCR processing extracts text from handwritten PDFs using Gemini Flash 2.0 via OpenRouter.
+
+**Files Created:**
+- `lib/storage/r2-client.ts` - R2 storage client with S3-compatible API
+- `lib/storage/signed-urls.ts` - Signed URL generation for uploads and reads
+- `lib/storage/index.ts` - Storage module barrel export
+- `lib/ai/client.ts` - OpenRouter AI client setup
+- `lib/ai/ocr.ts` - OCR service using LLM vision
+- `lib/ai/index.ts` - AI module barrel export
+- `lib/pdf/stream.ts` - PDF streaming utility for R2
+- `lib/pdf/renderer.ts` - PDF page analysis and rendering
+- `lib/pdf/index.ts` - PDF module barrel export
+- `lib/processing/job-manager.ts` - Processing job management with R2 persistence
+- `lib/processing/index.ts` - Processing module barrel export
+- `app/api/storage/upload-url/route.ts` - Get signed upload URL endpoint
+- `app/api/storage/read-url/route.ts` - Get signed read URL endpoint
+- `app/api/ocr/route.ts` - OCR job start and status endpoint
+- `components/processing-status.tsx` - Job progress display component
+- `components/ocr-viewer.tsx` - OCR results viewer with search
+- `components/pdf-upload-ocr.tsx` - Integrated PDF upload with OCR flow
+- `types/extraction.ts` - Content types, example categories, extraction parameters
+- `types/processing.ts` - Processing job types
+
+**Files Modified:**
+- `lib/local-storage.ts` - Renamed from lib/storage.ts to avoid conflict
+- `lib/__tests__/local-storage.test.ts` - Renamed test file
+- `app/api/upload/route.ts` - Updated to use R2 storage
+- `components/upload-zone.tsx` - Added direct R2 upload with progress
+- `types/index.ts` - Added new type exports
+
+**Dependencies Added:**
+- `@aws-sdk/client-s3` - S3 client for R2
+- `@aws-sdk/s3-request-presigner` - Signed URL generation
+- `pdfjs-dist` - PDF parsing
+
+**Key Features:**
+- Direct browser-to-R2 uploads for files >10MB with progress tracking
+- Signed URLs for secure file access (1 hour default expiry)
+- PDF metadata extraction and page analysis
+- Handwritten PDF detection (samples pages to determine OCR needs)
+- OCR using Gemini Flash 2.0 optimized for UPSC essay content
+- Processing job persistence in R2
+- Progress tracking with polling
+- OCR result viewer with search, copy, and download
+
+**Architecture:**
+- R2 storage replaces Vercel Blob for large file support
+- XMLHttpRequest used for upload progress (fetch doesn't support it)
+- Jobs cached in-memory and persisted to R2
+- Page-by-page OCR with batch processing support
+
+---
+
+### Planning Session - Sprints 8-12 (2026-01-23) - Completed
+
+**Context:** User provided comprehensive strategy document with UPSC essay extraction parameters.
+
+**Key Decisions:**
+- **Storage**: Migrate from Vercel Blob to Cloudflare R2 for large file support (190MB PDFs)
+- **R2 Benefits**: Signed URLs, streaming, no egress costs, better for large files
+- **Content Types**: Introductions, conclusions, examples (11 categories), quotes, thinkers, arguments, books/poems, keywords
+- **Classification**: Content can appear in multiple themes (cross-theme handling)
+- **Output**: Dual-section notes (Your Notes + Topper Insights), synced to Notion
+
+**Sprint Breakdown:**
+- Sprint 8: PDF Processing & OCR Infrastructure (R2, streaming, OCR)
+- Sprint 9: Content Extraction Engine (essay detection, structured extraction)
+- Sprint 10: Theme Classification (cross-theme, user content, review UI)
+- Sprint 11: Comparison & Gap Analysis (user vs topper, suggestions)
+- Sprint 12: Note Generation & Notion Sync (dual-section, conciseness, sync)
+
+**Files Updated:**
+- `docs/plan.md` - Added R2 storage, detailed extraction parameters, file structure
+- `docs/sprints.md` - Added 50+ detailed tasks for Sprints 8-12
+- `docs/progress.md` - Updated current sprint status
+
+---
+
+### Bug Fix - Settings Persistence (2026-01-23) - Completed
+
+**Problem:** Settings on `/settings/parameters` page were not persisting after page refresh.
+
+**Root Cause:** The `useLocalStorage` hook had a stale closure bug - the `setValue` function used `storedValue` from its closure which could be stale during rapid updates.
+
+**Files Modified:**
+- `lib/hooks/use-local-storage.ts` - Fixed stale closure with functional state update
+- `lib/notion/config.ts` - Created helper to prioritize env API key
+- `app/api/notion/connect/route.ts` - Added GET endpoint for env-based connection check
+- `app/api/notion/search/route.ts` - Use `getNotionApiKey()` helper
+- `app/api/themes/route.ts` - Use `getNotionApiKey()` helper
+- `components/notion-connector.tsx` - Check env connection on mount, reordered hooks
+- `components/notion-page-search.tsx` - Removed console.log statements
+- `components/parameters-content.tsx` - Fixed unused param, extracted StrategyDocumentSection
+- `components/themes-content.tsx` - Check connection via API
+
+**Key Fix:**
+```tsx
+// BEFORE (buggy - stale closure):
+const setValue = useCallback((value) => {
+    const valueToStore = value instanceof Function ? value(storedValue) : value;
+    setStoredValue(valueToStore);
+    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+}, [key, storedValue]);
+
+// AFTER (fixed - functional update):
+const setValue = useCallback((value) => {
+    setStoredValue((prevStoredValue) => {
+        const valueToStore = value instanceof Function ? value(prevStoredValue) : value;
+        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        return valueToStore;
+    });
+}, [key]);
+```
+
+---
 
 ### Sprint 7 - Dashboard & Overview (2026-01-23) - Completed
 
@@ -233,11 +441,12 @@ Track completed work, current status, and next steps.
 **Rationale:** Better SSR, reduced client bundle, cleaner separation of concerns
 **Pattern:** Pages render client components from /components for interactivity
 
-### AD-002: localStorage for Settings
+### AD-002: Convex for Projects, localStorage for Settings
 
-**Decision:** Store user settings (Notion API key, theme page ID) in localStorage
-**Rationale:** No backend needed for MVP, user controls their own data
-**Trade-off:** Settings don't persist across devices
+**Decision:** Projects stored in Convex database, user settings in localStorage
+**Rationale:** Projects need server-side access for API routes; settings are client-only preferences
+**Trade-off:** Settings don't persist across devices (acceptable for API keys)
+**Migration:** Previously used localStorage for projects which broke API routes (server can't access localStorage)
 
 ### AD-003: Barrel Types Export
 
@@ -250,6 +459,17 @@ Track completed work, current status, and next steps.
 **Decision:** Pass Notion API key via request body to API routes, not env var
 **Rationale:** Allows user to configure their own key without server restart
 **Trade-off:** Key transmitted on each request (HTTPS encrypted)
+
+### AD-005: Convex Database for Project Data
+
+**Decision:** Use Convex for project and content source storage
+**Rationale:**
+- Real-time subscriptions for automatic UI updates
+- Works from both client (useQuery) and server contexts
+- Type-safe with generated TypeScript types
+- Handles complex queries with indexes
+**Pattern:** Components use `useQuery` for reads, `useMutation` for writes
+**Setup:** Requires `bunx convex dev` to connect and generate types
 
 ---
 

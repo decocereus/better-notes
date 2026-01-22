@@ -12,7 +12,34 @@ export type {
 	ThemeNotes,
 	TopperPattern,
 } from "./content";
-
+// Extraction types
+export type {
+	ContentQuality,
+	ContentSourceType as ExtractedContentSourceType,
+	ContentType,
+	EssayBoundary,
+	EssayExtractionResult,
+	ExampleCategory,
+	ExtractedContent,
+	ExtractionParameters,
+	ThemeMapping,
+} from "./extraction";
+export { DEFAULT_EXTRACTION_PARAMETERS } from "./extraction";
+// Processing types
+export type {
+	OcrJobResults,
+	OcrPageResult,
+	ProcessingError,
+	ProcessingJob,
+	ProcessingJobResult,
+	ProcessingJobStatus,
+	ProcessingJobSummary,
+	ProcessingJobType,
+	StartClassificationJobInput,
+	StartExtractionJobInput,
+	StartOcrJobInput,
+	UploadedFile,
+} from "./processing";
 // Project types
 export type {
 	AddSourceInput,
@@ -31,7 +58,6 @@ export type {
 	NotionConnectionStatus,
 	TaskType,
 } from "./settings";
-// biome-ignore lint/performance/noBarrelFile: Intentional re-export of default settings constant (AD-003)
 export { DEFAULT_SETTINGS } from "./settings";
 // Theme types
 export type {

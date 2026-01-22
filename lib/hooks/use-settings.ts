@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import type { ExtractionParameters } from "@/types/extraction";
 import { useLocalStorage } from "./use-local-storage";
 
 /**
@@ -19,6 +20,8 @@ export interface AppSettings {
 	outputPageId?: string;
 	/** Model configuration per task */
 	modelConfig?: Record<string, string>;
+	/** Extraction parameters for content extraction from essays */
+	extractionParameters?: ExtractionParameters;
 }
 
 const SETTINGS_KEY = "betternotes:settings";

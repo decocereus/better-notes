@@ -23,6 +23,9 @@
             "maxAllowedComplexity": 15
           }
         }
+      },
+      "performance": {
+        "noBarrelFile": "off"
       }
     }
   },

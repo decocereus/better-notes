@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CollectionStorage, LocalStorage } from "../storage";
+import { CollectionStorage, LocalStorage } from "../local-storage";
 
 // Create a fresh store for each test
 let store: Record<string, string> = {};

@@ -1,46 +1,89 @@
 "use client";
 
-import { CheckCircle, ExternalLink, Loader2, XCircle } from "lucide-react";
+import {
+	CheckCircle,
+	ExternalLink,
+	Loader2,
+	Settings,
+	XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useLocalStorage } from "@/lib/hooks/use-local-storage";
+import { useSettings } from "@/lib/hooks/use-settings";
 
-type ConnectionStatus = "idle" | "testing" | "connected" | "failed";
+type ConnectionStatus =
+	| "idle"
+	| "checking"
+	| "testing"
+	| "connected"
+	| "failed";
+type ConnectionSource = "env" | "localStorage" | null;
 
 interface ConnectionState {
 	status: ConnectionStatus;
 	user?: string;
 	error?: string;
+	source: ConnectionSource;
 }
-
-const STORAGE_KEY = "betternotes:notion-api-key";
 
 /**
  * Notion connection component for the settings page.
- * Handles API key input, connection testing, and status display.
+ * Prioritizes env variable, falls back to localStorage API key.
  */
 export function NotionConnector() {
-	const [storedApiKey, setStoredApiKey, isHydrated] = useLocalStorage(
-		STORAGE_KEY,
-		""
-	);
+	const { settings, isHydrated, updateSetting, clearSetting } = useSettings();
 	const [apiKey, setApiKey] = useState("");
 	const [connection, setConnection] = useState<ConnectionState>({
-		status: "idle",
+		status: "checking",
+		source: null,
 	});
 
-	// Define testConnection before the effect that uses it
+	// Check for env-based connection on mount
+	useEffect(() => {
+		async function checkEnvConnection() {
+			try {
+				const response = await fetch("/api/notion/connect", {
+					method: "GET",
+				});
+				const data = (await response.json()) as {
+					valid: boolean;
+					user?: string;
+					error?: string;
+					source?: "env" | "request";
+				};
+
+				if (data.valid && data.source === "env") {
+					setConnection({
+						status: "connected",
+						user: data.user,
+						source: "env",
+					});
+					// Also save to settings so isNotionConnected returns true
+					updateSetting("notionApiKey", "env-configured");
+					return;
+				}
+			} catch {
+				// Env check failed, continue to localStorage check
+			}
+
+			// No env variable, check localStorage
+			setConnection({ status: "idle", source: null });
+		}
+
+		checkEnvConnection();
+	}, [updateSetting]);
+
 	const testConnection = useCallback(
 		async (keyToTest: string) => {
 			if (!keyToTest.trim()) {
-				setConnection({ status: "idle" });
+				setConnection({ status: "idle", source: null });
 				return;
 			}
 
-			setConnection({ status: "testing" });
+			setConnection({ status: "testing", source: null });
 
 			try {
 				const response = await fetch("/api/notion/connect", {
@@ -59,33 +102,42 @@ export function NotionConnector() {
 					setConnection({
 						status: "connected",
 						user: data.user,
+						source: "localStorage",
 					});
-					// Save the working API key
-					setStoredApiKey(keyToTest);
+					// Save the working API key to unified settings
+					updateSetting("notionApiKey", keyToTest);
 				} else {
 					setConnection({
 						status: "failed",
 						error: data.error ?? "Connection failed",
+						source: null,
 					});
 				}
 			} catch (error) {
 				setConnection({
 					status: "failed",
 					error: error instanceof Error ? error.message : "Connection failed",
+					source: null,
 				});
 			}
 		},
-		[setStoredApiKey]
+		[updateSetting]
 	);
 
-	// Sync local state with stored value after hydration
+	// Sync local input with stored value after hydration
 	useEffect(() => {
-		if (isHydrated && storedApiKey) {
-			setApiKey(storedApiKey);
-			// Auto-test if we have a stored key
-			testConnection(storedApiKey);
+		if (
+			isHydrated &&
+			settings.notionApiKey &&
+			settings.notionApiKey !== "env-configured"
+		) {
+			setApiKey(settings.notionApiKey);
+			// Auto-test stored key if we're not already connected via env
+			if (connection.source !== "env") {
+				testConnection(settings.notionApiKey);
+			}
 		}
-	}, [isHydrated, storedApiKey, testConnection]);
+	}, [isHydrated, settings.notionApiKey, connection.source, testConnection]);
 
 	const handleTestConnection = useCallback(() => {
 		testConnection(apiKey);
@@ -93,28 +145,60 @@ export function NotionConnector() {
 
 	const handleDisconnect = useCallback(() => {
 		setApiKey("");
-		setStoredApiKey("");
-		setConnection({ status: "idle" });
-	}, [setStoredApiKey]);
+		clearSetting("notionApiKey");
+		setConnection({ status: "idle", source: null });
+	}, [clearSetting]);
 
 	const handleKeyChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement>) => {
 			setApiKey(e.target.value);
 			// Reset status when key changes
-			if (connection.status !== "idle") {
-				setConnection({ status: "idle" });
+			if (connection.status !== "idle" && connection.source !== "env") {
+				setConnection({ status: "idle", source: null });
 			}
 		},
-		[connection.status]
+		[connection.status, connection.source]
 	);
 
-	// Show loading state during hydration
-	if (!isHydrated) {
+	// Show loading state during initial check
+	if (connection.status === "checking" || !isHydrated) {
 		return (
 			<Card className="p-6">
 				<div className="flex items-center gap-2 text-muted-foreground">
 					<Loader2 className="size-4 animate-spin" />
-					<span className="text-sm">Loading settings...</span>
+					<span className="text-sm">Checking Notion connection...</span>
+				</div>
+			</Card>
+		);
+	}
+
+	// Connected via environment variable - simplified UI
+	if (connection.source === "env" && connection.status === "connected") {
+		return (
+			<Card className="p-6">
+				<h3 className="font-medium text-lg">Notion Connection</h3>
+				<p className="mt-1 text-muted-foreground text-sm">
+					Connected via environment variable.
+				</p>
+
+				<div className="mt-6">
+					<div className="flex items-start gap-3 rounded-md bg-green-500/10 p-3">
+						<CheckCircle className="mt-0.5 size-4 text-green-600" />
+						<div>
+							<p className="font-medium text-green-800 text-sm dark:text-green-200">
+								Connected via NOTION_API_KEY
+							</p>
+							{connection.user && (
+								<p className="text-green-700 text-xs dark:text-green-300">
+									Authenticated as: {connection.user}
+								</p>
+							)}
+							<p className="mt-1 text-green-700 text-xs dark:text-green-300">
+								<Settings className="mr-1 inline size-3" />
+								Configured in .env.local
+							</p>
+						</div>
+					</div>
 				</div>
 			</Card>
 		);
@@ -173,7 +257,8 @@ export function NotionConnector() {
 						>
 							notion.so/my-integrations
 							<ExternalLink className="size-3" />
-						</a>
+						</a>{" "}
+						or set NOTION_API_KEY in .env.local
 					</p>
 				</div>
 

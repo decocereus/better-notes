@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "convex/react";
 import {
 	BookOpen,
 	CheckCircle2,
@@ -10,8 +11,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
-import { useProjects } from "@/lib/hooks/use-projects";
+import { api } from "@/convex/_generated/api";
 import { useSettings } from "@/lib/hooks/use-settings";
+import type { Project } from "@/types/project";
 import type { MainTheme } from "@/types/theme";
 
 interface ThemeStats {
@@ -78,7 +80,7 @@ function ConnectionStatus({
 export function DashboardStats() {
 	const { settings, isHydrated, isNotionConnected, hasThemePage } =
 		useSettings();
-	const { projects, isHydrated: isProjectsHydrated } = useProjects();
+	const projects = useQuery(api.projects.list) as Project[] | undefined;
 	const [themeStats, setThemeStats] = useState<ThemeStats | null>(null);
 	const [isLoadingThemes, setIsLoadingThemes] = useState(false);
 
@@ -137,7 +139,7 @@ export function DashboardStats() {
 	}, [isHydrated, hasThemePage, settings.themePageId, settings.notionApiKey]);
 
 	// Show loading state until hydrated
-	const isLoading = !(isHydrated && isProjectsHydrated);
+	const isLoading = !isHydrated || projects === undefined;
 
 	// Check if LLM is configured (has custom model config)
 	const hasModelConfig =
@@ -163,7 +165,7 @@ export function DashboardStats() {
 					icon={<FolderKanban className="size-5" />}
 					isLoading={isLoading}
 					label="Projects"
-					value={projects.length}
+					value={projects?.length ?? 0}
 				/>
 				<StatCard
 					icon={<BookOpen className="size-5" />}

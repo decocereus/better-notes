@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation } from "convex/react";
 import { ExternalLink, Loader2, Upload } from "lucide-react";
 import { useState } from "react";
 import type { UploadResponse } from "@/app/api/upload/route";
@@ -16,13 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UploadZone } from "@/components/upload-zone";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
-import type { ContentSource } from "@/types/project";
 
 interface AddSourceDialogProps {
 	trigger: React.ReactNode;
 	projectId: string;
-	onSourceAdded?: (source: ContentSource) => void;
 }
 
 type TabType = "notion" | "upload";
@@ -43,11 +44,9 @@ function extractPageNameFromUrl(url: string): string {
 	return name || "Notion Page";
 }
 
-export function AddSourceDialog({
-	trigger,
-	projectId,
-	onSourceAdded,
-}: AddSourceDialogProps) {
+export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
+	const addSource = useMutation(api.projects.addSource);
+
 	const [open, setOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState<TabType>("notion");
 	const [notionUrl, setNotionUrl] = useState("");
@@ -74,26 +73,15 @@ export function AddSourceDialog({
 		try {
 			const pageName = extractPageNameFromUrl(trimmedUrl);
 
-			const response = await fetch(`/api/projects/${projectId}/sources`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					type: "notion",
-					reference: trimmedUrl,
-					name: pageName,
-				}),
+			await addSource({
+				projectId: projectId as Id<"projects">,
+				type: "notion",
+				reference: trimmedUrl,
+				name: pageName,
 			});
-
-			if (!response.ok) {
-				const data = await response.json();
-				throw new Error(data.error || "Failed to add source");
-			}
-
-			const { source } = (await response.json()) as { source: ContentSource };
 
 			setNotionUrl("");
 			setOpen(false);
-			onSourceAdded?.(source);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to add source");
 		} finally {
@@ -106,28 +94,17 @@ export function AddSourceDialog({
 
 		// Add uploaded file as content source
 		try {
-			const sourceResponse = await fetch(`/api/projects/${projectId}/sources`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					type:
-						MIME_TO_SOURCE_TYPE[
-							response.type as keyof typeof MIME_TO_SOURCE_TYPE
-						] || "image",
-					reference: response.url,
-					name: response.filename,
-				}),
+			const sourceType =
+				MIME_TO_SOURCE_TYPE[
+					response.type as keyof typeof MIME_TO_SOURCE_TYPE
+				] || "image";
+
+			await addSource({
+				projectId: projectId as Id<"projects">,
+				type: sourceType as "pdf" | "image",
+				reference: response.url,
+				name: response.filename,
 			});
-
-			if (!sourceResponse.ok) {
-				const data = await sourceResponse.json();
-				throw new Error(data.error || "Failed to add source");
-			}
-
-			const { source } = (await sourceResponse.json()) as {
-				source: ContentSource;
-			};
-			onSourceAdded?.(source);
 		} catch (err) {
 			setError(
 				err instanceof Error

@@ -13,6 +13,9 @@ import {
 	MAX_FILE_SIZE_DISPLAY,
 } from "@/lib/constants/upload";
 
+/** Threshold for using direct R2 upload (10MB) */
+const DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024;
+
 interface UploadZoneProps {
 	projectId?: string;
 	onUploadComplete?: (response: UploadResponse) => void;
@@ -25,6 +28,7 @@ interface FileWithPreview {
 	file: File;
 	preview?: string;
 	status: "pending" | "uploading" | "completed" | "error";
+	progress?: number;
 	error?: string;
 	response?: UploadResponse;
 }
@@ -52,6 +56,7 @@ function createFileWithPreview(file: File): FileWithPreview {
 		file,
 		preview,
 		status: validationError ? "error" : "pending",
+		progress: 0,
 		error: validationError ?? undefined,
 	};
 }
@@ -74,6 +79,100 @@ function getFileItemClassName(status: FileWithPreview["status"]): string {
 	return "flex items-center gap-3 rounded-lg border p-3 border-border";
 }
 
+/**
+ * Uploads a file directly to R2 using a signed URL.
+ * Returns a promise with progress updates via callback.
+ */
+async function uploadDirectToR2(
+	file: File,
+	projectId: string,
+	onProgress: (progress: number) => void
+): Promise<UploadResponse> {
+	// Step 1: Get signed upload URL
+	const urlResponse = await fetch("/api/storage/upload-url", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			filename: file.name,
+			contentType: file.type,
+			projectId,
+			fileSize: file.size,
+		}),
+	});
+
+	if (!urlResponse.ok) {
+		const error = await urlResponse.json();
+		throw new Error(error.error || "Failed to get upload URL");
+	}
+
+	const { uploadUrl, key } = await urlResponse.json();
+
+	// Step 2: Upload directly to R2 with progress tracking
+	await new Promise<void>((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+
+		xhr.upload.addEventListener("progress", (event) => {
+			if (event.lengthComputable) {
+				const percent = Math.round((event.loaded / event.total) * 100);
+				onProgress(percent);
+			}
+		});
+
+		xhr.addEventListener("load", () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				resolve();
+			} else {
+				reject(new Error(`Upload failed with status ${xhr.status}`));
+			}
+		});
+
+		xhr.addEventListener("error", () => {
+			reject(new Error("Network error during upload"));
+		});
+
+		xhr.open("PUT", uploadUrl);
+		xhr.setRequestHeader("Content-Type", file.type);
+		xhr.send(file);
+	});
+
+	// Return the response in the expected format
+	return {
+		key,
+		url: key,
+		filename: file.name,
+		size: file.size,
+		sizeFormatted: formatFileSize(file.size),
+		type: file.type,
+		sourceType: file.type === "application/pdf" ? "pdf" : "image",
+	};
+}
+
+/**
+ * Uploads a file through the server (for smaller files).
+ */
+async function uploadThroughServer(
+	file: File,
+	projectId: string | undefined
+): Promise<UploadResponse> {
+	const formData = new FormData();
+	formData.append("file", file);
+	if (projectId) {
+		formData.append("projectId", projectId);
+	}
+
+	const response = await fetch("/api/upload", {
+		method: "POST",
+		body: formData,
+	});
+
+	if (!response.ok) {
+		const errorData = await response.json();
+		throw new Error(errorData.error || "Upload failed");
+	}
+
+	return response.json();
+}
+
 export function UploadZone({
 	projectId,
 	onUploadComplete,
@@ -84,36 +183,40 @@ export function UploadZone({
 	const [isDragging, setIsDragging] = useState(false);
 	const [files, setFiles] = useState<FileWithPreview[]>([]);
 
+	const updateFileProgress = useCallback((index: number, progress: number) => {
+		setFiles((prev) =>
+			prev.map((f, i) => (i === index ? { ...f, progress } : f))
+		);
+	}, []);
+
 	const uploadFile = useCallback(
 		async (fileWithPreview: FileWithPreview, index: number) => {
 			const { file } = fileWithPreview;
 
 			setFiles((prev) =>
-				prev.map((f, i) => (i === index ? { ...f, status: "uploading" } : f))
+				prev.map((f, i) =>
+					i === index ? { ...f, status: "uploading", progress: 0 } : f
+				)
 			);
 
 			try {
-				const formData = new FormData();
-				formData.append("file", file);
-				if (projectId) {
-					formData.append("projectId", projectId);
+				let data: UploadResponse;
+
+				// Use direct R2 upload for large files
+				if (file.size > DIRECT_UPLOAD_THRESHOLD && projectId) {
+					data = await uploadDirectToR2(file, projectId, (progress) =>
+						updateFileProgress(index, progress)
+					);
+				} else {
+					// Use server upload for smaller files
+					data = await uploadThroughServer(file, projectId);
 				}
-
-				const response = await fetch("/api/upload", {
-					method: "POST",
-					body: formData,
-				});
-
-				if (!response.ok) {
-					const errorData = await response.json();
-					throw new Error(errorData.error || "Upload failed");
-				}
-
-				const data = (await response.json()) as UploadResponse;
 
 				setFiles((prev) =>
 					prev.map((f, i) =>
-						i === index ? { ...f, status: "completed", response: data } : f
+						i === index
+							? { ...f, status: "completed", progress: 100, response: data }
+							: f
 					)
 				);
 
@@ -131,7 +234,7 @@ export function UploadZone({
 				onUploadError?.(errorMessage);
 			}
 		},
-		[projectId, onUploadComplete, onUploadError]
+		[projectId, onUploadComplete, onUploadError, updateFileProgress]
 	);
 
 	const processFiles = useCallback(
@@ -276,8 +379,9 @@ interface FileItemProps {
 }
 
 function FileItem({ fileWithPreview, onRemove }: FileItemProps) {
-	const { file, preview, status, error, response } = fileWithPreview;
+	const { file, preview, status, progress, error, response } = fileWithPreview;
 	const isImage = file.type.startsWith("image/");
+	const isLargeFile = file.size > DIRECT_UPLOAD_THRESHOLD;
 
 	return (
 		<div className={getFileItemClassName(status)}>
@@ -301,9 +405,22 @@ function FileItem({ fileWithPreview, onRemove }: FileItemProps) {
 				<p className="text-muted-foreground text-xs">
 					{formatFileSize(file.size)}
 					{status === "completed" && response && " • Uploaded"}
-					{status === "uploading" && " • Uploading..."}
+					{status === "uploading" && isLargeFile && progress !== undefined && (
+						<> • {progress}%</>
+					)}
+					{status === "uploading" && !isLargeFile && " • Uploading..."}
 				</p>
 				{error && <p className="text-destructive text-xs">{error}</p>}
+
+				{/* Progress bar for large file uploads */}
+				{status === "uploading" && isLargeFile && progress !== undefined && (
+					<div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+						<div
+							className="h-full bg-primary transition-all duration-300"
+							style={{ width: `${progress}%` }}
+						/>
+					</div>
+				)}
 			</div>
 
 			<div className="shrink-0">

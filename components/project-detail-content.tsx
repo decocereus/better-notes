@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation, useQuery } from "convex/react";
 import {
 	ArrowLeft,
 	FileText,
@@ -7,12 +8,11 @@ import {
 	MoreVertical,
 	Pencil,
 	Plus,
-	RefreshCw,
 	Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { AddSourceDialog } from "@/components/add-source-dialog";
 import { SourceList } from "@/components/source-list";
 import {
@@ -35,135 +35,60 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import type { ContentSource, Project } from "@/types/project";
 
 interface ProjectDetailContentProps {
 	projectId: string;
 }
 
-function shouldDeleteFromBlobStorage(source: ContentSource): boolean {
-	const isFileSource = source.type === "pdf" || source.type === "image";
-	const isBlobUrl = source.reference.includes("blob.vercel-storage.com");
-	return isFileSource && isBlobUrl;
-}
-
-async function deleteFileFromBlobStorage(url: string): Promise<void> {
-	const response = await fetch("/api/upload/delete", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ url }),
-	});
-
-	if (!response.ok) {
-		const errorData = await response.json();
-		throw new Error(errorData.error || "Failed to delete file from storage");
-	}
-}
-
-async function removeSourceFromProject(
-	projectId: string,
-	sourceId: string
-): Promise<void> {
-	const response = await fetch(`/api/projects/${projectId}/sources`, {
-		method: "DELETE",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ sourceId }),
-	});
-
-	if (!response.ok) {
-		throw new Error("Failed to delete source");
-	}
-}
-
 export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const router = useRouter();
-	const [project, setProject] = useState<Project | null>(null);
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+
+	// Convex queries and mutations
+	const project = useQuery(api.projects.get, {
+		id: projectId as Id<"projects">,
+	}) as Project | null | undefined;
+	const removeProject = useMutation(api.projects.remove);
+	const removeSource = useMutation(api.projects.removeSource);
+
 	const [deleteSourceId, setDeleteSourceId] = useState<string | null>(null);
 	const [isDeletingSource, setIsDeletingSource] = useState(false);
 	const [showDeleteProject, setShowDeleteProject] = useState(false);
 	const [isDeletingProject, setIsDeletingProject] = useState(false);
-
-	const fetchProject = useCallback(async () => {
-		try {
-			setIsLoading(true);
-			setError(null);
-
-			const response = await fetch(`/api/projects/${projectId}`);
-			if (!response.ok) {
-				if (response.status === 404) {
-					setProject(null);
-					return;
-				}
-				throw new Error("Failed to fetch project");
-			}
-
-			const data = (await response.json()) as { project: Project };
-			setProject(data.project);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to load project");
-		} finally {
-			setIsLoading(false);
-		}
-	}, [projectId]);
-
-	useEffect(() => {
-		fetchProject();
-	}, [fetchProject]);
-
-	const handleSourceAdded = (source: ContentSource) => {
-		if (project) {
-			setProject({
-				...project,
-				sources: [...project.sources, source],
-				updatedAt: new Date().toISOString(),
-			});
-		}
-	};
+	const [error, setError] = useState<string | null>(null);
 
 	const handleDeleteSource = async () => {
-		if (!(deleteSourceId && project)) {
-			return;
-		}
-
-		const source = project.sources.find((s) => s.id === deleteSourceId);
-		if (!source) {
+		if (!deleteSourceId) {
 			return;
 		}
 
 		setIsDeletingSource(true);
+		setError(null);
+
 		try {
-			if (shouldDeleteFromBlobStorage(source)) {
-				await deleteFileFromBlobStorage(source.reference);
+			// Delete file from R2 storage if needed
+			const source = project?.sources.find((s) => s.id === deleteSourceId);
+			if (source && shouldDeleteFromR2Storage(source)) {
+				await deleteFileFromR2Storage(source.reference);
 			}
 
-			await removeSourceFromProject(projectId, deleteSourceId);
-
-			setProject({
-				...project,
-				sources: project.sources.filter((s) => s.id !== deleteSourceId),
-				updatedAt: new Date().toISOString(),
-			});
+			await removeSource({ id: deleteSourceId as Id<"contentSources"> });
+			setDeleteSourceId(null);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to delete source");
 		} finally {
 			setIsDeletingSource(false);
-			setDeleteSourceId(null);
 		}
 	};
 
 	const handleDeleteProject = async () => {
 		setIsDeletingProject(true);
+		setError(null);
+
 		try {
-			const response = await fetch(`/api/projects/${projectId}`, {
-				method: "DELETE",
-			});
-
-			if (!response.ok) {
-				throw new Error("Failed to delete project");
-			}
-
+			await removeProject({ id: projectId as Id<"projects"> });
 			router.push("/projects");
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to delete project");
@@ -176,7 +101,8 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 		? project?.sources.find((s) => s.id === deleteSourceId)
 		: null;
 
-	if (isLoading) {
+	// Loading state
+	if (project === undefined) {
 		return (
 			<div className="flex items-center justify-center py-12">
 				<LoadingSpinner size="lg" />
@@ -184,7 +110,8 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 		);
 	}
 
-	if (!project) {
+	// Not found state
+	if (project === null) {
 		return (
 			<div className="space-y-6">
 				<div className="flex items-center gap-4">
@@ -227,12 +154,7 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 					)}
 				</div>
 				<div className="flex items-center gap-2">
-					<Button onClick={fetchProject} size="icon" variant="outline">
-						<RefreshCw className="size-4" />
-						<span className="sr-only">Refresh</span>
-					</Button>
 					<AddSourceDialog
-						onSourceAdded={handleSourceAdded}
 						projectId={projectId}
 						trigger={
 							<Button>
@@ -287,7 +209,6 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 						</p>
 						<div className="mt-4 flex gap-2">
 							<AddSourceDialog
-								onSourceAdded={handleSourceAdded}
 								projectId={projectId}
 								trigger={
 									<Button variant="outline">
@@ -299,7 +220,17 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 						</div>
 					</div>
 				) : (
-					<SourceList onDelete={setDeleteSourceId} sources={project.sources} />
+					<SourceList
+						onDelete={setDeleteSourceId}
+						sources={project.sources.map((s) => ({
+							id: s.id as string,
+							type: s.type,
+							reference: s.reference,
+							name: s.name,
+							addedAt: s.addedAt,
+							status: s.status,
+						}))}
+					/>
 				)}
 			</Card>
 
@@ -357,4 +288,23 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			</AlertDialog>
 		</div>
 	);
+}
+
+function shouldDeleteFromR2Storage(source: ContentSource): boolean {
+	const isFileSource = source.type === "pdf" || source.type === "image";
+	const isR2Key = source.reference.startsWith("projects/");
+	return isFileSource && isR2Key;
+}
+
+async function deleteFileFromR2Storage(key: string): Promise<void> {
+	const response = await fetch("/api/upload/delete", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ key }),
+	});
+
+	if (!response.ok) {
+		const errorData = await response.json();
+		throw new Error(errorData.error || "Failed to delete file from storage");
+	}
 }

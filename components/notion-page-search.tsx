@@ -1,24 +1,20 @@
 "use client";
 
 import { Database, FileText, Loader2, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
-import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import type { SearchResultItem } from "@/lib/notion/types";
 
-const STORAGE_KEY = "betternotes:notion-api-key";
 const DEBOUNCE_MS = 300;
 
 interface NotionPageSearchProps {
 	/** Called when a page is selected */
-	onSelect: (item: SearchResultItem) => void;
+	onSelect: (pageId: string, pageTitle: string) => void;
 	/** Placeholder text for the search input */
 	placeholder?: string;
 	/** Optional class name for the container */
 	className?: string;
-	/** Optional API key override (uses localStorage if not provided) */
-	apiKey?: string;
 	/** Optional error callback */
 	onError?: (error: string) => void;
 }
@@ -26,16 +22,14 @@ interface NotionPageSearchProps {
 /**
  * Search input with results dropdown for finding Notion pages.
  * Uses debounced search and displays results in a dropdown.
+ * API key is handled server-side (env variable or passed from settings).
  */
 export function NotionPageSearch({
 	onSelect,
 	placeholder = "Search Notion pages...",
 	className,
-	apiKey: apiKeyProp,
 	onError,
 }: NotionPageSearchProps) {
-	const [storedApiKey] = useLocalStorage(STORAGE_KEY, "");
-	const apiKey = apiKeyProp ?? storedApiKey;
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<SearchResultItem[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -48,7 +42,7 @@ export function NotionPageSearch({
 
 	// Debounced search
 	useEffect(() => {
-		if (!(query.trim() && apiKey)) {
+		if (!query.trim()) {
 			setResults([]);
 			setIsOpen(false);
 			return;
@@ -62,7 +56,7 @@ export function NotionPageSearch({
 				const response = await fetch("/api/notion/search", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ apiKey, query }),
+					body: JSON.stringify({ query }),
 				});
 
 				const data = (await response.json()) as {
@@ -90,7 +84,7 @@ export function NotionPageSearch({
 		}, DEBOUNCE_MS);
 
 		return () => clearTimeout(timeoutId);
-	}, [query, apiKey, onError]);
+	}, [query, onError]);
 
 	// Close dropdown when clicking outside
 	useEffect(() => {
@@ -109,7 +103,7 @@ export function NotionPageSearch({
 
 	const handleSelect = useCallback(
 		(item: SearchResultItem) => {
-			onSelect(item);
+			onSelect(item.id, item.title);
 			setQuery("");
 			setResults([]);
 			setIsOpen(false);
@@ -152,26 +146,6 @@ export function NotionPageSearch({
 		},
 		[isOpen, results, selectedIndex, handleSelect]
 	);
-
-	const showNoConnection = useMemo(() => !apiKey, [apiKey]);
-
-	if (showNoConnection) {
-		return (
-			<div className={className}>
-				<div className="relative">
-					<Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-					<Input
-						className="pl-9"
-						disabled
-						placeholder="Connect Notion first..."
-					/>
-				</div>
-				<p className="mt-1 text-muted-foreground text-xs">
-					Connect your Notion account in Settings to search pages.
-				</p>
-			</div>
-		);
-	}
 
 	return (
 		<div className={className} ref={containerRef}>

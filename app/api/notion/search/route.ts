@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { NotionAPIError, NotionClient } from "@/lib/notion/client";
+import { getNotionApiKey } from "@/lib/notion/config";
 import type { SearchResultItem } from "@/lib/notion/types";
 
 interface SearchRequest {
-	apiKey: string;
+	apiKey?: string;
 	query?: string;
 }
 
@@ -16,8 +17,9 @@ interface SearchResponse {
 /**
  * POST /api/notion/search
  * Searches the Notion workspace for pages and databases.
+ * Uses NOTION_API_KEY env variable if set, otherwise uses apiKey from request body.
  *
- * Request body: { apiKey: string, query?: string }
+ * Request body: { apiKey?: string, query?: string }
  * Response: { results: SearchResultItem[], error?: string }
  */
 export async function POST(
@@ -25,11 +27,15 @@ export async function POST(
 ): Promise<NextResponse<SearchResponse>> {
 	try {
 		const body = (await request.json()) as SearchRequest;
-		const { apiKey, query = "" } = body;
+		const { query = "" } = body;
+		const apiKey = getNotionApiKey(body.apiKey);
 
 		if (!apiKey) {
 			return NextResponse.json(
-				{ error: "API key is required" },
+				{
+					error:
+						"No API key configured. Set NOTION_API_KEY environment variable or provide apiKey in request.",
+				},
 				{ status: 400 }
 			);
 		}

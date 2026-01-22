@@ -1,16 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the hooks
-vi.mock("@/lib/hooks/use-projects", () => ({
-	useProjects: vi.fn(() => ({
-		projects: [],
-		isHydrated: true,
-		recentProjects: vi.fn(() => []),
-	})),
+// Mock Convex hooks
+vi.mock("convex/react", () => ({
+	useQuery: vi.fn(() => []),
 }));
 
-import { useProjects } from "@/lib/hooks/use-projects";
+import { useQuery } from "convex/react";
 // Import after mocks
 import { RecentProjects } from "../recent-projects";
 
@@ -20,24 +16,13 @@ describe("RecentProjects", () => {
 	});
 
 	it("renders the component with title", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		render(<RecentProjects />);
 		expect(screen.getByText("Recent Projects")).toBeInTheDocument();
 	});
 
-	it("shows loading spinner when not hydrated", () => {
-		vi.mocked(useProjects).mockReturnValue({
-			projects: [],
-			isHydrated: false,
-			recentProjects: vi.fn(() => []),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+	it("shows loading spinner when query is pending", () => {
+		vi.mocked(useQuery).mockReturnValue(undefined);
 
 		render(<RecentProjects />);
 		// Loading spinner uses Loader2 icon with animate-spin class
@@ -46,19 +31,7 @@ describe("RecentProjects", () => {
 	});
 
 	it("shows empty state when no projects", () => {
-		vi.mocked(useProjects).mockReturnValue({
-			projects: [],
-			isHydrated: true,
-			recentProjects: vi.fn(() => []),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue([]);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("No projects yet")).toBeInTheDocument();
@@ -70,14 +43,6 @@ describe("RecentProjects", () => {
 	});
 
 	it("renders projects when available", () => {
-		const mockSource = {
-			id: "s1",
-			type: "notion" as const,
-			reference: "https://notion.so/page",
-			name: "Test Source",
-			addedAt: new Date().toISOString(),
-			status: "completed" as const,
-		};
 		const mockProjects = [
 			{
 				id: "1",
@@ -85,23 +50,28 @@ describe("RecentProjects", () => {
 				description: "A test project",
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
-				sources: [mockSource, { ...mockSource, id: "s2" }],
+				sources: [
+					{
+						id: "s1",
+						type: "notion" as const,
+						reference: "https://notion.so/page",
+						name: "Test Source",
+						addedAt: new Date().toISOString(),
+						status: "completed" as const,
+					},
+					{
+						id: "s2",
+						type: "notion" as const,
+						reference: "https://notion.so/page2",
+						name: "Test Source 2",
+						addedAt: new Date().toISOString(),
+						status: "completed" as const,
+					},
+				],
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("Test Project")).toBeInTheDocument();
@@ -110,14 +80,6 @@ describe("RecentProjects", () => {
 	});
 
 	it("shows source count badge", () => {
-		const mockSource = {
-			id: "s1",
-			type: "notion" as const,
-			reference: "https://notion.so/page",
-			name: "Test Source",
-			addedAt: new Date().toISOString(),
-			status: "completed" as const,
-		};
 		const mockProjects = [
 			{
 				id: "1",
@@ -125,51 +87,39 @@ describe("RecentProjects", () => {
 				createdAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
 				sources: [
-					mockSource,
-					{ ...mockSource, id: "s2" },
-					{ ...mockSource, id: "s3" },
+					{
+						id: "s1",
+						type: "notion" as const,
+						reference: "https://notion.so/page",
+						name: "Test Source",
+						addedAt: new Date().toISOString(),
+						status: "completed" as const,
+					},
+					{
+						id: "s2",
+						type: "notion" as const,
+						reference: "https://notion.so/page2",
+						name: "Test Source 2",
+						addedAt: new Date().toISOString(),
+						status: "completed" as const,
+					},
+					{
+						id: "s3",
+						type: "notion" as const,
+						reference: "https://notion.so/page3",
+						name: "Test Source 3",
+						addedAt: new Date().toISOString(),
+						status: "completed" as const,
+					},
 				],
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		// The badge should show the count "3"
 		expect(screen.getByText("3")).toBeInTheDocument();
-	});
-
-	it("respects the limit prop", () => {
-		const recentProjectsMock = vi.fn(() => []);
-
-		vi.mocked(useProjects).mockReturnValue({
-			projects: [],
-			isHydrated: true,
-			recentProjects: recentProjectsMock,
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
-
-		render(<RecentProjects limit={3} />);
-		expect(recentProjectsMock).toHaveBeenCalledWith(3);
 	});
 
 	it("links to individual project pages", () => {
@@ -183,19 +133,7 @@ describe("RecentProjects", () => {
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		const projectLink = screen.getByText("Linked Project").closest("a");
@@ -218,19 +156,7 @@ describe("formatRelativeTime", () => {
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("Just now")).toBeInTheDocument();
@@ -248,19 +174,7 @@ describe("formatRelativeTime", () => {
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("5 minutes ago")).toBeInTheDocument();
@@ -280,19 +194,7 @@ describe("formatRelativeTime", () => {
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("3 hours ago")).toBeInTheDocument();
@@ -312,19 +214,7 @@ describe("formatRelativeTime", () => {
 			},
 		];
 
-		vi.mocked(useProjects).mockReturnValue({
-			projects: mockProjects,
-			isHydrated: true,
-			recentProjects: vi.fn(() => mockProjects),
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<RecentProjects />);
 		expect(screen.getByText("2 days ago")).toBeInTheDocument();

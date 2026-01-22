@@ -23,13 +23,14 @@ A Next.js web app that helps UPSC aspirants prepare for essay writing by:
 ## Dependencies to Add
 
 ```bash
-bun add ai @ai-sdk/openai zod @vercel/blob
+bun add ai @ai-sdk/openai zod @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 ```
 
 - `ai` - Vercel AI SDK for LLM integration
 - `@ai-sdk/openai` - OpenRouter-compatible provider
 - `zod` - Schema validation for LLM outputs
-- `@vercel/blob` - File uploads for PDFs/images
+- `@aws-sdk/client-s3` - S3-compatible client for Cloudflare R2
+- `@aws-sdk/s3-request-presigner` - Signed URL generation for R2
 
 ---
 
@@ -45,11 +46,26 @@ NOTION_API_KEY=ntn_xxx
 # User selects models via UI dropdown, but API key is always from env
 OPENROUTER_API_KEY=sk-or-xxx
 
-# Vercel Blob (for file uploads)
-BLOB_READ_WRITE_TOKEN=xxx
+# Cloudflare R2 Storage (for PDF uploads and file storage)
+R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=xxx
+R2_SECRET_ACCESS_KEY=xxx
+R2_BUCKET_NAME=betternotes
 ```
 
 **Note**: OpenRouter API key is environment-only. Users can only select which models to use per task via the settings dropdown - they cannot view or modify the API key.
+
+### Why R2 over Vercel Blob?
+
+| Feature | Vercel Blob | Cloudflare R2 |
+|---------|-------------|---------------|
+| File size limit | 500MB | 5GB+ |
+| Signed URLs | Limited | Full S3-compatible |
+| Streaming | No | Yes |
+| Cost (storage) | $0.40/GB | $0.015/GB |
+| Cost (egress) | $0.30/GB | Free |
+
+For 190MB+ topper PDFs, R2 provides better streaming, signed URLs for secure access, and significant cost savings.
 
 ---
 
@@ -68,9 +84,25 @@ BLOB_READ_WRITE_TOKEN=xxx
 - Each theme aggregates content from all relevant sources
 
 ### 2. Topper Pattern Extraction
-- Upload handwritten PDFs → OCR via LLM Vision → Extract patterns
-- Store: intro techniques, body structure, example types, conclusion styles
-- Flag overused examples (Gandhi, Buddha, Ashoka)
+- Upload handwritten PDFs (up to 190MB) → Stream from R2 → OCR via LLM Vision
+- Extract structured content types:
+  - **Introductions**: Anecdotes, quotes, movie/book references, catchy phrases
+  - **Conclusions**: Quote-based, ellipse back to intro, Sanskrit shlokas, summaries
+  - **Examples** (by category):
+    - Individual aspect
+    - Ethical aspect (extra marks!)
+    - Governance (bureaucrats, schemes, Panchayati Raj)
+    - Societal (vulnerable groups, tribals, women, SC/ST, LGBTQIA+)
+    - Environment (climate change, biodiversity, eco-feminism)
+    - Mythological (Indian mythology preferred)
+    - Sports, Religion, Business, International Relations, S&T
+  - **Quotes**: Multi-use preferred, from key thinkers
+  - **Thinkers**: Indian & Western (Gandhi, Marx, Buddha, Vivekananda, Plato, etc.)
+  - **Arguments**: Diverse dimensions, WHY/HOW/WHAT IF framing
+  - **Books & Poems**: High-value literary references
+  - **Keywords & Phrases**: Multi-use phrases for revision
+- Flag overused examples (Gandhi, Buddha, Ashoka, Mandela)
+- Store all extracted content in Notion with theme classifications
 
 ### 3. Content Classification (Auto)
 - User mentions Notion page URL → system fetches content
@@ -87,18 +119,41 @@ BLOB_READ_WRITE_TOKEN=xxx
 #### Mode 1: Content Extraction & Comparison (Building NOW)
 - Extract content from user notes based on themes
 - Compare user content against topper content
-- Parameters: **Configurable via UI** (user will provide via strategy doc)
-- Default extraction criteria (placeholder - user will customize):
-  - Relevance to theme
-  - Uniqueness of examples
-  - Factual accuracy
-  - Cross-theme applicability
-  - [Additional parameters from strategy doc TBD]
+- **Configurable Parameters** (via Settings UI):
 
-#### Mode 2: Writer Mode (Building LATER)
+  **Example Categories to Extract:**
+  - Individual, Ethical, Governance, Societal, Environment
+  - Mythological, Sports, Religion, Business, IR, S&T
+  - User can enable/disable categories per their focus
+
+  **Content Quality Criteria:**
+  - Uniqueness (avoid overused examples)
+  - Relevance to theme and PYQs
+  - Cross-theme applicability (multi-use value)
+  - Diversity of examples across categories
+  - Essence illustration (does example capture theme core?)
+
+  **Thinker Handling:**
+  - Priority: Indian vs Western vs Balanced
+  - Key thinkers: Gandhi, Marx, Buddha, Vivekananda, Plato, Amartya Sen, Viktor Frankl
+  - Extract both quotes and anecdotes from their lives
+
+  **Quote Style:**
+  - Multi-use preferred (Marcus Aurelius, Emily Dickinson)
+  - Theme-specific when highly relevant
+  - Sanskrit shlokas (unique ones only, not Vasudhaiva Kutumbakam)
+
+  **Argument Dimensions:**
+  - WHY, HOW, WHAT IF framing (not just WHO, WHAT)
+  - Breadth over depth (multiple reasons, not repetition)
+  - Stakeholder perspectives (Family, Society, Nation, Judiciary)
+
+- Output: Gap analysis showing what user has vs what toppers have
+
+#### Mode 2: Writer Mode (Building LATER - Phase 2)
 - Essay writing evaluation
 - Parameters for writing quality (structure, flow, etc.)
-- Will be implemented in future phase
+- User uploads their essays for evaluation against topper patterns
 
 **Key: All parameters are configurable per theme via dashboard**
 
@@ -252,41 +307,69 @@ Parse by:
 ### LLM Prompts (Key)
 
 **OCR Extraction:**
-- Input: PDF page image
-- Output: Structured text with paragraphs preserved
-- Model: `google/gemini-2.0-flash` (vision)
+- Input: PDF page image (streamed from R2)
+- Output: Structured text with paragraphs preserved, handwriting interpreted
+- Model: `google/gemini-2.0-flash` (vision) - best for handwritten content
+- Processing: 10-page chunks, parallel (max 3 concurrent)
 
-**Pattern Extraction:**
-- Input: Topper essay text
-- Output: Intro pattern, body structure, examples, conclusion, style markers
-- Flag: Overused examples (Gandhi, Buddha, Ashoka, Mandela)
-- Model: `anthropic/claude-4.5-sonnet`
+**Essay Boundary Detection:**
+- Input: Combined OCR text from multiple pages
+- Output: Array of `{start_page, end_page, title_if_visible}`
+- Purpose: Identify where individual essays begin/end in large PDF
+- Model: `anthropic/claude-3.5-sonnet`
 
-**Content Classification (Auto):**
-- Input: Content from Notion page (user provides URL) + theme list
-- Process: Extract content → LLM classifies into themes/mini-themes
-- Output: Theme mappings with relevance scores, cross-references
-- Same content can map to multiple themes
-- Model: `anthropic/claude-4.5-sonnet` (cost-effective)
+**Content Extraction (Per Essay):**
+- Input: Single essay text + extraction parameters
+- Output: Structured content array with types:
+  ```typescript
+  {
+    type: 'introduction' | 'conclusion' | 'example' | 'quote' |
+          'thinker' | 'argument' | 'book_poem' | 'keyword_phrase',
+    content: string,
+    exampleCategory?: string,  // For examples only
+    quality: 'high' | 'medium' | 'low',
+    isOverused: boolean,
+    multiUse: boolean,  // Applicable across themes
+  }
+  ```
+- Extraction focus (from strategy doc):
+  - Introductions: Anecdotes that clarify ALL aspects of topic, catchy phrases
+  - Examples: Diverse categories, essence-illustrating, contemporary + historical mix
+  - Quotes: Multi-use preferred, from key thinkers
+  - Arguments: WHY/HOW/WHAT IF framing, breadth over depth
+- Flag overused: Gandhi, Buddha, Ashoka, Mandela (in generic contexts)
+- Model: `anthropic/claude-3.5-sonnet`
 
-**Comparison Analysis (Content Extraction Mode):**
-- Input: User content + topper content + extraction parameters
-- Output: Side-by-side comparison showing:
-  - What user has covered
-  - What toppers have that user is missing
-  - Gaps and suggestions
-- Parameters: Loaded from user's strategy doc (configurable per theme)
-- Model: `anthropic/claude-4.5-sonnet`
+**Content Classification:**
+- Input: Extracted content item + theme hierarchy (40+ themes)
+- Output: Array of `{mainThemeId, miniThemeId, relevanceScore}`
+- Cross-theme: Same content appears in ALL themes with score > 0.6
+- Model: `anthropic/claude-3-haiku` (fast, cheap, good enough)
+
+**Comparison Analysis:**
+- Input: User content + topper content + extraction parameters (per theme)
+- Output:
+  - Coverage map: What user has per category
+  - Gaps: What toppers have that user is missing
+  - Quality assessment: Uniqueness, diversity, depth
+  - Suggestions: Specific content to add
+- Model: `anthropic/claude-3.5-sonnet`
 
 **Note Generation (Dual-Section):**
-- Input: Classified user content + topper essays + themes
+- Input: Classified user content + topper content + theme context
 - Output per theme:
-  1. **Your Notes**: User's content - CONCISE, distilled, organized (not raw)
-  2. **Topper Insights**: Enriches user content with what they're missing
-- **Balance: Revisability + Quality** - neither compromised
-- Both sections must be revision-ready (scannable, not exhaustive)
-- Topper content complements, not duplicates user content
-- Model: `anthropic/claude-4.5-sonnet`
+  1. **Your Notes**: User's content - CONCISE, distilled, organized
+     - Key points in digestible form
+     - Examples kept concise
+     - Arguments in revision-ready format
+  2. **Topper Insights**: Enriches (not duplicates) user content
+     - Unique examples user is missing
+     - Strong arguments and techniques
+     - Reusable intro hooks and conclusion approaches
+     - Cross-theme applicability notes
+- **Critical**: Both sections must be revision-ready (scannable before exam)
+- **Balance**: Quality content + Revisability - neither compromised
+- Model: `anthropic/claude-3.5-sonnet`
 
 ### Output Format (Per Theme)
 
@@ -335,24 +418,29 @@ better-notes/
 │   ├── layout.tsx                  # (exists)
 │   ├── globals.css                 # (exists)
 │   ├── settings/
-│   │   ├── page.tsx                # Notion setup + mode toggle
-│   │   └── parameters/
-│   │       └── page.tsx            # Configure extraction parameters
+│   │   ├── page.tsx                # Notion setup + output destination
+│   │   ├── parameters/
+│   │   │   └── page.tsx            # Configure extraction parameters
+│   │   └── models/
+│   │       └── page.tsx            # LLM model selection
 │   ├── projects/
 │   │   ├── page.tsx                # List projects
 │   │   └── [id]/
 │   │       └── page.tsx            # Project workspace
 │   ├── themes/
+│   │   ├── page.tsx                # Theme list/tree
 │   │   └── [id]/
-│   │       └── page.tsx            # Theme detail
+│   │       ├── page.tsx            # Theme detail
+│   │       └── compare/
+│   │           └── page.tsx        # Per-theme comparison
 │   ├── upload/
 │   │   └── page.tsx                # Upload interface
 │   ├── patterns/
-│   │   └── page.tsx                # Topper patterns
+│   │   └── page.tsx                # Extracted patterns browser
 │   ├── compare/
-│   │   └── page.tsx                # Comparison tool
+│   │   └── page.tsx                # Global comparison tool
 │   ├── notes/
-│   │   ├── page.tsx                # All notes
+│   │   ├── page.tsx                # All generated notes
 │   │   └── [themeId]/
 │   │       └── page.tsx            # Theme notes
 │   └── api/
@@ -360,91 +448,171 @@ better-notes/
 │       │   ├── connect/route.ts
 │       │   ├── search/route.ts
 │       │   └── sync/route.ts
+│       ├── storage/
+│       │   ├── upload-url/route.ts # Get signed upload URL
+│       │   └── read-url/route.ts   # Get signed read URL
+│       ├── processing/
+│       │   ├── route.ts            # Start/status of processing jobs
+│       │   └── [jobId]/route.ts    # Individual job status
+│       ├── ocr/route.ts            # OCR single page/chunk
+│       ├── extract/route.ts        # Extract patterns from text
+│       ├── classify/route.ts       # Classify content into themes
+│       ├── compare/route.ts        # Run comparison analysis
+│       ├── generate/route.ts       # Generate notes
 │       ├── parameters/route.ts     # Extraction parameters CRUD
 │       ├── themes/route.ts
 │       ├── projects/
-│       │   ├── route.ts            # CRUD projects
+│       │   ├── route.ts
 │       │   └── [id]/
-│       │       └── sources/
-│       │           └── route.ts    # Add sources to project
-│       ├── upload/route.ts
-│       ├── extract/route.ts
-│       ├── classify/route.ts
-│       ├── compare/route.ts
-│       └── generate/route.ts
+│       │       └── sources/route.ts
+│       └── models/route.ts
 ├── components/
 │   ├── ui/                         # (exists - shadcn)
-│   ├── theme-tree.tsx
-│   ├── upload-zone.tsx
+│   ├── theme-tree.tsx              # (exists)
+│   ├── upload-zone.tsx             # (exists - update for R2)
 │   ├── pattern-card.tsx
 │   ├── comparison-results.tsx
 │   ├── revision-note.tsx
-│   └── notion-connector.tsx
+│   ├── notion-connector.tsx        # (exists)
+│   ├── processing-status.tsx       # Job progress tracking
+│   ├── ocr-viewer.tsx              # View OCR results
+│   ├── extracted-content.tsx       # Browse extracted content
+│   ├── classification-review.tsx   # Review/adjust classifications
+│   └── sync-status.tsx             # Notion sync status
 ├── lib/
 │   ├── utils.ts                    # (exists)
+│   ├── storage/
+│   │   ├── r2-client.ts            # R2 S3-compatible client
+│   │   └── signed-urls.ts          # Upload/read URL generation
+│   ├── pdf/
+│   │   ├── stream.ts               # Stream PDF from R2
+│   │   ├── chunker.ts              # Split PDF into chunks
+│   │   └── renderer.ts             # Page to image conversion
+│   ├── processing/
+│   │   ├── job-manager.ts          # Track processing jobs
+│   │   └── queue.ts                # Processing queue management
+│   ├── extraction/
+│   │   ├── essay-detector.ts       # Detect essay boundaries
+│   │   ├── content-extractor.ts    # Extract structured content
+│   │   └── quality.ts              # Quality scoring, overused flagging
+│   ├── classification/
+│   │   ├── classifier.ts           # Theme classification
+│   │   ├── cross-theme.ts          # Handle multi-theme content
+│   │   └── aggregator.ts           # Aggregate content per theme
+│   ├── comparison/
+│   │   ├── gap-analyzer.ts         # User vs topper gap analysis
+│   │   └── suggestions.ts          # Generate improvement suggestions
+│   ├── generation/
+│   │   ├── note-generator.ts       # Generate dual-section notes
+│   │   ├── formatter.ts            # Format for Notion
+│   │   └── conciseness.ts          # Ensure revision-ready output
 │   ├── notion/
-│   │   ├── client.ts               # API client
-│   │   ├── parsers.ts              # Block parsing
-│   │   └── theme-parser.ts         # Theme extraction
+│   │   ├── client.ts               # (exists)
+│   │   ├── parsers.ts              # (exists)
+│   │   ├── theme-parser.ts         # (exists)
+│   │   ├── content-fetcher.ts      # Fetch user content from Notion
+│   │   └── block-builder.ts        # Build Notion blocks for sync
 │   └── llm/
-│       ├── provider.ts             # OpenRouter setup
-│       ├── prompts.ts              # All prompts
-│       └── schemas.ts              # Zod schemas
+│       ├── provider.ts             # (exists)
+│       ├── prompts/
+│       │   ├── ocr.ts              # OCR prompts
+│       │   ├── extraction.ts       # Content extraction prompts
+│       │   ├── classification.ts   # Classification prompts
+│       │   ├── comparison.ts       # Comparison prompts
+│       │   └── generation.ts       # Note generation prompts
+│       └── schemas/
+│           ├── extraction.ts       # Zod schemas for extraction
+│           ├── classification.ts   # Zod schemas for classification
+│           └── generation.ts       # Zod schemas for generation
 ├── types/
-│   ├── theme.ts
-│   ├── project.ts
-│   ├── content.ts
-│   ├── pattern.ts
-│   └── comparison.ts
-├── .env.local                      # (create)
-└── plan.md                         # (this file)
+│   ├── theme.ts                    # (exists)
+│   ├── project.ts                  # (exists)
+│   ├── content.ts                  # (exists)
+│   ├── settings.ts                 # (exists)
+│   ├── extraction.ts               # Extracted content types
+│   ├── processing.ts               # Processing job types
+│   └── comparison.ts               # Comparison result types
+├── .env.local
+└── docs/
+    ├── plan.md                     # (this file)
+    ├── sprints.md                  # Sprint breakdown
+    ├── progress.md                 # Progress tracking
+    └── learnings.md                # Development learnings
 ```
 
 ---
 
 ## Verification Plan
 
+### Foundation (Sprints 1-7) ✅ COMPLETED
 1. **Notion Connection**: Enter API key → Test → Show accessible pages
 2. **Theme Parsing**: Select theme page → Display hierarchy correctly
-3. **File Upload**: Upload PDF → Store in Vercel Blob → Show preview
-4. **OCR**: Process PDF → Show extracted text with confidence
-5. **Pattern Extraction**: Analyze topper essay → Display patterns
-6. **Classification**: Classify notes → Show theme mappings
-7. **Comparison**: Run analysis → Display scores and suggestions
-8. **Note Generation**: Generate notes → Show formatted output
-9. **Notion Sync**: Sync notes → Verify page created in Notion
+3. **File Upload**: Upload PDF → Store in storage → Show preview
+4. **LLM Configuration**: Select models per task → Test connection
+
+### Processing Pipeline (Sprints 8-12)
+5. **R2 Upload**: Upload 190MB PDF → Stream to R2 → Get signed URL
+6. **OCR**: Process PDF pages → Show extracted text per page
+7. **Pattern Extraction**: Analyze topper essays → Display structured content
+8. **Classification**: Classify content → Show theme mappings → User review
+9. **Comparison**: Select theme → See user vs topper content → Gap analysis
+10. **Note Generation**: Generate dual-section notes → Preview → Sync to Notion
 
 ---
 
 ## Implementation Sequence
 
-### Week 1: Foundation
-- [ ] Add dependencies (ai, zod, @vercel/blob)
-- [ ] Create `lib/notion/client.ts`
-- [ ] Create `lib/llm/provider.ts`
-- [ ] Create type definitions
-- [ ] Build settings page with Notion connection
+### Phase 1: Foundation (COMPLETED ✅)
 
-### Week 2: Theme & Upload
-- [ ] Implement theme parsing
-- [ ] Build dashboard with theme tree
-- [ ] Create upload interface
-- [ ] Implement file upload API
+#### Sprints 1-7: Foundation Complete
+- [x] Project setup, dependencies, environment
+- [x] Notion integration (connection, search, theme parsing)
+- [x] Project management (CRUD, content sources)
+- [x] File upload infrastructure (Vercel Blob - to migrate to R2)
+- [x] LLM infrastructure (OpenRouter, model config)
+- [x] Dashboard with stats, quick actions
 
-### Week 3: Processing Pipeline
-- [ ] Implement OCR extraction
-- [ ] Implement pattern extraction
-- [ ] Build patterns display page
-- [ ] Implement content classification
+### Phase 2: Processing Pipeline (IN PROGRESS)
 
-### Week 4: Analysis & Output
-- [ ] Implement comparison analysis
-- [ ] Build comparison UI with scores
-- [ ] Implement note generation
-- [ ] Build notes display pages
+#### Sprint 8: PDF Processing & OCR Infrastructure ✅ COMPLETED
+- [x] R2 storage client with signed URLs
+- [x] Large file upload (direct browser-to-R2 with progress)
+- [x] PDF streaming and page analysis
+- [x] OCR API with Gemini Flash 2.0 via OpenRouter
+- [x] Processing job management with R2 persistence
+- [x] OCR results viewer with search and export
 
-### Week 5: Polish
-- [ ] Implement Notion sync
-- [ ] Add cross-theme references
-- [ ] Error handling & loading states
-- [ ] Testing & refinement
+#### Sprint 9: Content Extraction Engine (NEXT)
+- [ ] Essay boundary detection
+- [ ] Structured content extraction (intros, examples, quotes, etc.)
+- [ ] Extraction parameters UI (configurable)
+- [ ] Quality scoring and overused flagging
+- [ ] Extracted content browser
+
+#### Sprint 10: Theme Classification
+- [ ] Classification prompts and schemas
+- [ ] Cross-theme content handling
+- [ ] User content fetcher (from Notion)
+- [ ] Classification review/adjustment UI
+- [ ] Content aggregation per theme
+
+#### Sprint 11: Comparison & Gap Analysis
+- [ ] Comparison prompts and logic
+- [ ] Per-theme comparison view
+- [ ] Gap analysis (user vs topper)
+- [ ] Missing content suggestions
+- [ ] Comparison results UI
+
+#### Sprint 12: Note Generation & Notion Sync
+- [ ] Note generation prompts (dual-section)
+- [ ] Conciseness enforcement
+- [ ] Notes preview UI
+- [ ] Notion destination configuration
+- [ ] Notion sync (block builder)
+- [ ] Sync status tracking
+
+### Phase 3: Writer Mode (FUTURE)
+- [ ] Essay upload and parsing
+- [ ] Writing quality evaluation
+- [ ] Feedback against topper patterns
+- [ ] Improvement suggestions

@@ -6,7 +6,11 @@
 export const env = {
 	NOTION_API_KEY: process.env.NOTION_API_KEY ?? "",
 	OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
-	BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN ?? "",
+	// Cloudflare R2 Storage
+	R2_ENDPOINT: process.env.R2_ENDPOINT ?? "",
+	R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "",
+	R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY ?? "",
+	R2_BUCKET_NAME: process.env.R2_BUCKET_NAME ?? "",
 } as const;
 
 export type EnvKey = keyof typeof env;

@@ -11,12 +11,9 @@ vi.mock("@/lib/hooks/use-settings", () => ({
 	})),
 }));
 
-vi.mock("@/lib/hooks/use-projects", () => ({
-	useProjects: vi.fn(() => ({
-		projects: [],
-		isHydrated: true,
-		recentProjects: vi.fn(() => []),
-	})),
+// Mock Convex for child components (DashboardStats, RecentProjects)
+vi.mock("convex/react", () => ({
+	useQuery: vi.fn(() => []),
 }));
 
 import { useSettings } from "@/lib/hooks/use-settings";

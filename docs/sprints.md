@@ -1577,49 +1577,1765 @@ export async function testLLMConnection(modelId: string): Promise<{
 
 ## Future Considerations
 
-### Cloudflare R2 CDN (Deferred)
-Currently using Vercel Blob for file storage. In future, may migrate to Cloudflare R2:
-- Better for long-term file storage and referencing
-- User can easily reference back to uploaded images/PDFs
-- CDN distribution for faster access
-- Cost-effective for larger storage needs
+---
 
-**Migration path**: Replace Vercel Blob with R2 in Sprint 5 tasks when ready.
+## Sprint 8: PDF Processing & OCR Infrastructure
+
+**Goal:** Process large PDFs (190MB+) with R2 storage and OCR via LLM Vision.
+
+**Demo:** Upload 190MB topper PDF → see pages processing with progress → view extracted text per page.
+
+### Tasks
+
+#### 8.1 Create R2 Storage Client
+**Description:** Set up Cloudflare R2 client with S3-compatible SDK.
+
+**Files to Create:**
+- `lib/storage/r2-client.ts`
+
+**Implementation:**
+```typescript
+// lib/storage/r2-client.ts
+import { S3Client } from '@aws-sdk/client-s3';
+
+export const r2Client = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+});
+
+export const R2_BUCKET = process.env.R2_BUCKET_NAME!;
+```
+
+**Validation:**
+- [ ] Client instantiates without error
+- [ ] Can connect to R2 bucket
+- [ ] Environment variables documented
 
 ---
 
-## Future Sprints (Strategy-Dependent)
+#### 8.2 Create Signed URL Utilities
+**Description:** Generate signed URLs for upload and read operations.
 
-These sprints will be detailed after the strategy document is provided:
+**Files to Create:**
+- `lib/storage/signed-urls.ts`
 
-### Sprint 8: OCR & Text Extraction
-- Process uploaded PDFs with LLM Vision
-- Extract text from images
-- Store extracted content
+**Implementation:**
+```typescript
+// lib/storage/signed-urls.ts
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-### Sprint 9: Topper Pattern Extraction
-- Analyze topper essays
-- Extract patterns (intro, body, conclusion)
-- Store patterns database
+export async function getUploadUrl(key: string, contentType: string, expiresIn = 3600) {
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+  return getSignedUrl(r2Client, command, { expiresIn });
+}
 
-### Sprint 10: Content Classification
-- Auto-classify content into themes
-- Cross-theme mapping
-- User review/adjustment UI
+export async function getReadUrl(key: string, expiresIn = 3600) {
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+  });
+  return getSignedUrl(r2Client, command, { expiresIn });
+}
+```
 
-### Sprint 11: Comparison & Analysis
-- Compare user vs topper content
-- Apply extraction parameters (from strategy doc)
-- Generate gap analysis
+**Validation:**
+- [ ] Upload URL allows browser direct upload
+- [ ] Read URL allows file download
+- [ ] URLs expire after specified time
+- Unit tests:
+  - [ ] URL generation with mocked client
 
-### Sprint 12: Note Generation
-- Generate dual-section notes
-- User content + Topper insights
-- Notion sync
+---
+
+#### 8.3 Create Upload URL API Route
+**Description:** API endpoint to get signed upload URL for browser direct upload.
+
+**Files to Create:**
+- `app/api/storage/upload-url/route.ts`
+
+**Implementation:**
+```typescript
+// Returns signed URL for browser to upload directly to R2
+// No file passes through server - better for large files
+export async function POST(request: NextRequest) {
+  const { filename, contentType, projectId } = await request.json();
+  const key = `projects/${projectId}/${Date.now()}-${filename}`;
+  const uploadUrl = await getUploadUrl(key, contentType);
+  return NextResponse.json({ uploadUrl, key });
+}
+```
+
+**Validation:**
+- [ ] Returns valid signed URL
+- [ ] Browser can upload directly to URL
+- [ ] File appears in R2 bucket
+
+---
+
+#### 8.4 Create Read URL API Route
+**Description:** API endpoint to get signed read URL for accessing files.
+
+**Files to Create:**
+- `app/api/storage/read-url/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { key } = await request.json();
+  const readUrl = await getReadUrl(key);
+  return NextResponse.json({ readUrl });
+}
+```
+
+**Validation:**
+- [ ] Returns valid signed URL
+- [ ] URL allows file access
+- [ ] URL expires correctly
+
+---
+
+#### 8.5 Update Upload Zone for R2
+**Description:** Modify UploadZone to use R2 direct upload instead of Vercel Blob.
+
+**Files to Modify:**
+- `components/upload-zone.tsx`
+
+**Implementation:**
+- Request signed URL from API
+- Upload directly to R2 from browser
+- Show upload progress (XMLHttpRequest for progress events)
+- Handle large files (190MB+)
+
+**Validation:**
+- [ ] Large files (190MB) upload successfully
+- [ ] Progress bar shows actual progress
+- [ ] Upload completes without timeout
+- [ ] File accessible via read URL
+
+---
+
+#### 8.6 Create PDF Streaming Utility
+**Description:** Stream PDF from R2 for processing without loading entire file.
+
+**Files to Create:**
+- `lib/pdf/stream.ts`
+
+**Implementation:**
+```typescript
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+
+export async function streamPdfFromR2(key: string): Promise<ReadableStream> {
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+  });
+  const response = await r2Client.send(command);
+  return response.Body as ReadableStream;
+}
+```
+
+**Validation:**
+- [ ] Can stream large PDF
+- [ ] Memory usage stays bounded
+- [ ] Stream can be piped to processing
+
+---
+
+#### 8.7 Create PDF Page Renderer
+**Description:** Convert PDF pages to images for OCR.
+
+**Files to Create:**
+- `lib/pdf/renderer.ts`
+
+**Implementation:**
+- Use pdf.js or similar for page extraction
+- Convert pages to PNG images
+- Handle page-by-page to manage memory
+- Return base64 or buffer for LLM
+
+**Validation:**
+- [ ] Extracts individual pages
+- [ ] Images are readable quality
+- [ ] Handles multi-hundred page PDFs
+
+---
+
+#### 8.8 Create Processing Job Types
+**Description:** Define types for processing job management.
+
+**Files to Create:**
+- `types/processing.ts`
+
+**Implementation:**
+```typescript
+export interface ProcessingJob {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  type: 'ocr' | 'extraction' | 'classification';
+  progress: number;
+  totalItems: number;
+  processedItems: number;
+  sourceKey: string;       // R2 key
+  results: unknown[];
+  errors: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OcrResult {
+  pageNumber: number;
+  text: string;
+  confidence: number;
+}
+```
+
+**Validation:**
+- [ ] Types compile without errors
+- [ ] Types exported from barrel
+
+---
+
+#### 8.9 Create Processing Job Manager
+**Description:** Manage processing jobs with status tracking.
+
+**Files to Create:**
+- `lib/processing/job-manager.ts`
+
+**Implementation:**
+```typescript
+// Store jobs in Notion database or localStorage for MVP
+export class JobManager {
+  async createJob(type: string, sourceKey: string): Promise<ProcessingJob>;
+  async updateProgress(jobId: string, progress: number): Promise<void>;
+  async addResult(jobId: string, result: unknown): Promise<void>;
+  async completeJob(jobId: string): Promise<void>;
+  async failJob(jobId: string, error: string): Promise<void>;
+  async getJob(jobId: string): Promise<ProcessingJob | null>;
+  async listJobs(): Promise<ProcessingJob[]>;
+}
+```
+
+**Validation:**
+- [ ] Can create and track jobs
+- [ ] Progress updates work
+- [ ] Job status transitions correctly
+- Unit tests for job lifecycle
+
+---
+
+#### 8.10 Create OCR API Route
+**Description:** OCR endpoint that processes PDF pages with Gemini Vision.
+
+**Files to Create:**
+- `app/api/ocr/route.ts`
+
+**Implementation:**
+```typescript
+// POST: Start OCR job for a PDF
+// GET: Get OCR results for a job
+export async function POST(request: NextRequest) {
+  const { sourceKey, projectId } = await request.json();
+
+  // Create job
+  const job = await jobManager.createJob('ocr', sourceKey);
+
+  // Process in background (or queue)
+  processOcrJob(job.id, sourceKey);
+
+  return NextResponse.json({ jobId: job.id });
+}
+
+async function processOcrJob(jobId: string, sourceKey: string) {
+  // Stream PDF from R2
+  // For each page: render to image → send to Gemini → store result
+  // Update job progress
+}
+```
+
+**Validation:**
+- [ ] Starts OCR job
+- [ ] Processes pages incrementally
+- [ ] Returns job ID for tracking
+- [ ] Results stored correctly
+
+---
+
+#### 8.11 Create Processing Status Component
+**Description:** UI component showing processing job progress.
+
+**Files to Create:**
+- `components/processing-status.tsx`
+
+**Implementation:**
+- Progress bar with percentage
+- Page count (X of Y pages)
+- Status badge (pending, processing, completed, failed)
+- Error display if failed
+- Auto-refresh while processing
+
+**Validation:**
+- [ ] Shows accurate progress
+- [ ] Updates in real-time
+- [ ] Handles error states
+- [ ] Completion state clear
+
+---
+
+#### 8.12 Create OCR Viewer Component
+**Description:** View OCR results page by page.
+
+**Files to Create:**
+- `components/ocr-viewer.tsx`
+
+**Implementation:**
+- Page navigation (prev/next)
+- Side-by-side: original image + extracted text
+- Text editing capability (for corrections)
+- Export/copy text
+
+**Validation:**
+- [ ] Can navigate pages
+- [ ] Shows image and text together
+- [ ] Text is editable
+- [ ] Can export results
+
+---
+
+#### 8.13 Integrate OCR into Upload Flow
+**Description:** After upload, prompt user to start OCR processing.
+
+**Files to Modify:**
+- `app/upload/page.tsx`
+- `components/upload-content.tsx`
+
+**Implementation:**
+- After successful upload, show "Start OCR" button
+- Navigate to processing status page
+- Show results when complete
+
+**Validation:**
+- [ ] Upload → OCR flow is seamless
+- [ ] User can track progress
+- [ ] Results viewable after completion
+
+---
+
+### Sprint 8 Completion Criteria ✅ COMPLETED
+- [x] Can upload 190MB PDF to R2
+- [x] PDF streams from R2 for processing
+- [x] OCR extracts text from handwritten pages
+- [x] Processing progress visible to user
+- [x] OCR results viewable and exportable
+- [ ] All tests passing (pending - Sprint 8 infrastructure tests)
+
+---
+
+## Sprint 9: Content Extraction Engine
+
+**Goal:** Extract structured content (intros, examples, quotes, etc.) from OCR'd text.
+
+**Demo:** OCR'd text → extracted intros, examples, quotes with categories → configurable parameters.
+
+### Tasks
+
+#### 9.1 Create Extraction Types
+**Description:** Define types for extracted content.
+
+**Files to Create:**
+- `types/extraction.ts`
+
+**Implementation:**
+```typescript
+export type ContentType =
+  | 'introduction'
+  | 'conclusion'
+  | 'example'
+  | 'quote'
+  | 'thinker'
+  | 'argument'
+  | 'book_poem'
+  | 'keyword_phrase';
+
+export type ExampleCategory =
+  | 'individual'
+  | 'ethical'
+  | 'governance'
+  | 'societal'
+  | 'environment'
+  | 'mythological'
+  | 'sports'
+  | 'religion'
+  | 'business'
+  | 'international_relations'
+  | 'science_tech';
+
+export interface ExtractedContent {
+  id: string;
+  sourceType: 'topper' | 'user';
+  sourceRef: string;
+  contentType: ContentType;
+  exampleCategory?: ExampleCategory;
+  content: string;
+  context?: string;
+  quality: 'high' | 'medium' | 'low';
+  isOverused: boolean;
+  multiUse: boolean;
+  themes: ThemeMapping[];
+  createdAt: string;
+}
+
+export interface ThemeMapping {
+  mainThemeId: string;
+  miniThemeId: string;
+  relevanceScore: number;
+}
+
+export interface ExtractionParameters {
+  enabledCategories: ExampleCategory[];
+  thinkerPriority: 'indian' | 'western' | 'balanced';
+  quoteStyle: 'multi_use_preferred' | 'theme_specific';
+  overusedExamples: string[];
+  minQualityThreshold: 'high' | 'medium' | 'low';
+}
+```
+
+**Validation:**
+- [ ] Types compile without errors
+- [ ] Covers all content types from strategy doc
+- [ ] Exported from barrel
+
+---
+
+#### 9.2 Create Essay Boundary Detector
+**Description:** Detect where essays start and end in OCR'd text.
+
+**Files to Create:**
+- `lib/extraction/essay-detector.ts`
+
+**Implementation:**
+```typescript
+export interface EssayBoundary {
+  startPage: number;
+  endPage: number;
+  title?: string;
+  wordCount: number;
+}
+
+export async function detectEssayBoundaries(
+  ocrResults: OcrResult[]
+): Promise<EssayBoundary[]> {
+  // Combine OCR text
+  // Send to Claude Sonnet to identify essay boundaries
+  // Look for: new essay indicators, title patterns, significant gaps
+  // Return boundaries
+}
+```
+
+**Validation:**
+- [ ] Correctly identifies essay starts/ends
+- [ ] Handles various formats
+- [ ] Returns useful boundaries
+- Unit tests with sample OCR text
+
+---
+
+#### 9.3 Create Extraction Prompts
+**Description:** LLM prompts for extracting different content types.
+
+**Files to Create:**
+- `lib/llm/prompts/extraction.ts`
+
+**Implementation:**
+```typescript
+export const EXTRACTION_SYSTEM_PROMPT = `
+You are an expert at analyzing UPSC topper essays and extracting valuable content.
+
+Extract the following types of content:
+1. INTRODUCTIONS: Anecdotes, quotes, movie/book references, catchy phrases
+2. CONCLUSIONS: Quote-based, ellipse back, Sanskrit shlokas, summaries
+3. EXAMPLES: Categorize by type (ethical, governance, societal, etc.)
+4. QUOTES: Note if multi-use or theme-specific
+5. THINKERS: Name, key idea, can be used as quote or anecdote
+6. ARGUMENTS: Core reasoning, WHY/HOW/WHAT IF framing
+7. BOOKS/POEMS: Literary references with relevance
+8. KEYWORDS/PHRASES: Reusable multi-theme phrases
+
+Quality criteria:
+- HIGH: Unique, insightful, directly usable
+- MEDIUM: Good but common
+- LOW: Generic or overused
+
+Flag as OVERUSED: Gandhi (in generic contexts), Buddha, Ashoka, Mandela
+Flag as MULTI-USE: Content applicable across multiple themes
+`;
+
+export function createExtractionPrompt(essayText: string, parameters: ExtractionParameters): string {
+  // Build prompt with essay text and parameters
+}
+```
+
+**Validation:**
+- [ ] Prompts extract all content types
+- [ ] Quality scoring works
+- [ ] Overused flagging works
+- [ ] Parameters respected
+
+---
+
+#### 9.4 Create Extraction Schemas
+**Description:** Zod schemas for validating LLM extraction output.
+
+**Files to Create:**
+- `lib/llm/schemas/extraction.ts`
+
+**Implementation:**
+```typescript
+import { z } from 'zod';
+
+export const ExtractedContentSchema = z.object({
+  contentType: z.enum([...]),
+  exampleCategory: z.enum([...]).optional(),
+  content: z.string(),
+  context: z.string().optional(),
+  quality: z.enum(['high', 'medium', 'low']),
+  isOverused: z.boolean(),
+  multiUse: z.boolean(),
+});
+
+export const ExtractionResultSchema = z.object({
+  items: z.array(ExtractedContentSchema),
+  essayTitle: z.string().optional(),
+  overallQuality: z.enum(['high', 'medium', 'low']),
+});
+```
+
+**Validation:**
+- [ ] Schemas validate correctly
+- [ ] Invalid data rejected
+- [ ] Types inferred correctly
+
+---
+
+#### 9.5 Create Content Extractor
+**Description:** Main extraction logic using LLM.
+
+**Files to Create:**
+- `lib/extraction/content-extractor.ts`
+
+**Implementation:**
+```typescript
+export async function extractContentFromEssay(
+  essayText: string,
+  parameters: ExtractionParameters,
+  sourceRef: string
+): Promise<ExtractedContent[]> {
+  const prompt = createExtractionPrompt(essayText, parameters);
+  const result = await generateObject({
+    model: provider(getModelForTask('pattern_extraction')),
+    schema: ExtractionResultSchema,
+    prompt,
+  });
+
+  return result.items.map(item => ({
+    ...item,
+    id: crypto.randomUUID(),
+    sourceType: 'topper',
+    sourceRef,
+    themes: [], // Classified later
+    createdAt: new Date().toISOString(),
+  }));
+}
+```
+
+**Validation:**
+- [ ] Extracts all content types
+- [ ] Respects parameters
+- [ ] Returns valid ExtractedContent[]
+- Integration test with real essay
+
+---
+
+#### 9.6 Create Quality Scorer
+**Description:** Score and flag content quality.
+
+**Files to Create:**
+- `lib/extraction/quality.ts`
+
+**Implementation:**
+```typescript
+const OVERUSED_PATTERNS = [
+  /gandhi/i,
+  /buddha/i,
+  /ashoka/i,
+  /mandela/i,
+  /vasudhaiva kutumbakam/i,
+];
+
+export function flagOverused(content: string): boolean {
+  return OVERUSED_PATTERNS.some(pattern => pattern.test(content));
+}
+
+export function assessMultiUse(content: string, contentType: ContentType): boolean {
+  // Quotes and arguments more likely to be multi-use
+  // Check for universal themes
+}
+```
+
+**Validation:**
+- [ ] Flags known overused examples
+- [ ] Multi-use detection reasonable
+- Unit tests for patterns
+
+---
+
+#### 9.7 Create Extract API Route
+**Description:** API endpoint to run extraction on OCR results.
+
+**Files to Create:**
+- `app/api/extract/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { ocrJobId, parameters } = await request.json();
+
+  // Get OCR results
+  const ocrResults = await getOcrResults(ocrJobId);
+
+  // Detect essay boundaries
+  const boundaries = await detectEssayBoundaries(ocrResults);
+
+  // Create extraction job
+  const job = await jobManager.createJob('extraction', ocrJobId);
+
+  // Extract from each essay
+  for (const boundary of boundaries) {
+    const essayText = getEssayText(ocrResults, boundary);
+    const content = await extractContentFromEssay(essayText, parameters, ocrJobId);
+    await jobManager.addResult(job.id, content);
+    await jobManager.updateProgress(job.id, ...);
+  }
+
+  return NextResponse.json({ jobId: job.id });
+}
+```
+
+**Validation:**
+- [ ] Processes all essays
+- [ ] Returns extraction results
+- [ ] Progress tracking works
+- [ ] Handles errors gracefully
+
+---
+
+#### 9.8 Create Extraction Parameters Page
+**Description:** UI to configure extraction parameters.
+
+**Files to Modify:**
+- `app/settings/parameters/page.tsx`
+
+**Files to Create:**
+- `components/parameters-config.tsx`
+
+**Implementation:**
+- Checkbox list for example categories
+- Radio for thinker priority
+- Radio for quote style
+- Text area for custom overused examples
+- Dropdown for quality threshold
+- Save to localStorage/Notion
+
+**Validation:**
+- [ ] All parameters editable
+- [ ] Changes persist
+- [ ] Defaults sensible
+- [ ] Reset to defaults works
+
+---
+
+#### 9.9 Create Extracted Content Browser
+**Description:** Browse and filter extracted content.
+
+**Files to Create:**
+- `components/extracted-content.tsx`
+
+**Implementation:**
+- Filter by content type
+- Filter by example category
+- Filter by quality
+- Search content
+- Show source reference
+- Expand to see full content + context
+
+**Validation:**
+- [ ] Filters work correctly
+- [ ] Search finds content
+- [ ] Displays all metadata
+- [ ] Good UX for browsing
+
+---
+
+#### 9.10 Integrate Extraction into Patterns Page
+**Description:** Show extracted content on patterns page.
+
+**Files to Modify:**
+- `app/patterns/page.tsx`
+
+**Implementation:**
+- List extraction jobs
+- Show extracted content per job
+- Group by content type
+- Stats (total intros, examples, etc.)
+
+**Validation:**
+- [ ] Shows all extracted content
+- [ ] Grouping works
+- [ ] Stats accurate
+
+---
+
+### Sprint 9 Completion Criteria
+- [ ] Essay boundaries detected correctly
+- [ ] All content types extracted
+- [ ] Quality scoring works
+- [ ] Overused examples flagged
+- [ ] Parameters configurable via UI
+- [ ] Extracted content browsable
+- [ ] All tests passing
+
+---
+
+## Sprint 10: Theme Classification
+
+**Goal:** Classify extracted content into theme hierarchy with cross-theme support.
+
+**Demo:** Extracted content → classified into themes → user can review/adjust → see content per theme.
+
+### Tasks
+
+#### 10.1 Create Classification Prompts
+**Description:** LLM prompts for classifying content into themes.
+
+**Files to Create:**
+- `lib/llm/prompts/classification.ts`
+
+**Implementation:**
+```typescript
+export const CLASSIFICATION_SYSTEM_PROMPT = `
+You are classifying UPSC essay content into themes.
+
+Given content and the theme hierarchy, determine which themes it applies to.
+Content can apply to MULTIPLE themes (cross-cutting content is valuable).
+
+Return relevance scores (0-1) for each applicable theme.
+Only include themes with score > 0.4.
+
+Theme hierarchy:
+{themes}
+`;
+
+export function createClassificationPrompt(
+  content: ExtractedContent,
+  themes: MainTheme[]
+): string {
+  // Build prompt with content and theme hierarchy
+}
+```
+
+**Validation:**
+- [ ] Classifications are sensible
+- [ ] Cross-theme content identified
+- [ ] Relevance scores meaningful
+
+---
+
+#### 10.2 Create Classification Schemas
+**Description:** Zod schemas for classification output.
+
+**Files to Create:**
+- `lib/llm/schemas/classification.ts`
+
+**Implementation:**
+```typescript
+export const ClassificationResultSchema = z.object({
+  mappings: z.array(z.object({
+    mainThemeId: z.string(),
+    miniThemeId: z.string(),
+    relevanceScore: z.number().min(0).max(1),
+    reasoning: z.string().optional(),
+  })),
+});
+```
+
+**Validation:**
+- [ ] Schema validates correctly
+- [ ] Scores in valid range
+
+---
+
+#### 10.3 Create Classifier
+**Description:** Main classification logic.
+
+**Files to Create:**
+- `lib/classification/classifier.ts`
+
+**Implementation:**
+```typescript
+export async function classifyContent(
+  content: ExtractedContent,
+  themes: MainTheme[]
+): Promise<ThemeMapping[]> {
+  const prompt = createClassificationPrompt(content, themes);
+  const result = await generateObject({
+    model: provider(getModelForTask('classification')),
+    schema: ClassificationResultSchema,
+    prompt,
+  });
+
+  return result.mappings.filter(m => m.relevanceScore > 0.6);
+}
+
+export async function classifyBatch(
+  contents: ExtractedContent[],
+  themes: MainTheme[]
+): Promise<Map<string, ThemeMapping[]>> {
+  // Classify in parallel batches
+}
+```
+
+**Validation:**
+- [ ] Single classification works
+- [ ] Batch processing efficient
+- [ ] Cross-theme handling correct
+
+---
+
+#### 10.4 Create Cross-Theme Handler
+**Description:** Handle content appearing in multiple themes.
+
+**Files to Create:**
+- `lib/classification/cross-theme.ts`
+
+**Implementation:**
+```typescript
+export function handleCrossThemeContent(
+  content: ExtractedContent,
+  mappings: ThemeMapping[]
+): ExtractedContent[] {
+  // Content appears in ALL mapped themes
+  // Each theme gets a reference to the content
+  // Maintain single source of truth
+}
+
+export function findCrossThemeContent(
+  allContent: ExtractedContent[]
+): ExtractedContent[] {
+  return allContent.filter(c => c.themes.length > 1);
+}
+```
+
+**Validation:**
+- [ ] Content in multiple themes
+- [ ] Single source of truth maintained
+- [ ] Can query cross-theme content
+
+---
+
+#### 10.5 Create Content Aggregator
+**Description:** Aggregate all content per theme.
+
+**Files to Create:**
+- `lib/classification/aggregator.ts`
+
+**Implementation:**
+```typescript
+export interface ThemeContent {
+  themeId: string;
+  themeName: string;
+  miniThemeId: string;
+  miniThemeName: string;
+  content: {
+    introductions: ExtractedContent[];
+    conclusions: ExtractedContent[];
+    examples: ExtractedContent[];
+    quotes: ExtractedContent[];
+    thinkers: ExtractedContent[];
+    arguments: ExtractedContent[];
+    booksPoems: ExtractedContent[];
+    keywords: ExtractedContent[];
+  };
+  stats: {
+    total: number;
+    bySource: { topper: number; user: number };
+    byQuality: { high: number; medium: number; low: number };
+  };
+}
+
+export function aggregateContentByTheme(
+  content: ExtractedContent[],
+  themes: MainTheme[]
+): ThemeContent[] {
+  // Group content by theme
+  // Calculate stats
+}
+```
+
+**Validation:**
+- [ ] Content grouped correctly
+- [ ] Stats accurate
+- [ ] All content types included
+
+---
+
+#### 10.6 Create User Content Fetcher
+**Description:** Fetch and extract content from user's Notion pages.
+
+**Files to Create:**
+- `lib/notion/content-fetcher.ts`
+
+**Implementation:**
+```typescript
+export async function fetchUserContent(
+  pageId: string,
+  apiKey: string
+): Promise<{ text: string; images: string[] }> {
+  const client = new NotionClient(apiKey);
+  const blocks = await client.getPageContent(pageId);
+
+  const text = parseBlocksToText(blocks);
+  const images = extractImageUrls(blocks);
+
+  return { text, images };
+}
+
+export async function extractUserContent(
+  pageId: string,
+  apiKey: string,
+  parameters: ExtractionParameters
+): Promise<ExtractedContent[]> {
+  const { text } = await fetchUserContent(pageId, apiKey);
+  const content = await extractContentFromEssay(text, parameters, pageId);
+  return content.map(c => ({ ...c, sourceType: 'user' }));
+}
+```
+
+**Validation:**
+- [ ] Fetches Notion page content
+- [ ] Handles images (for future OCR)
+- [ ] Extracts user content correctly
+
+---
+
+#### 10.7 Create Classify API Route
+**Description:** API endpoint to classify content into themes.
+
+**Files to Create:**
+- `app/api/classify/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { extractionJobId, themePageId, apiKey } = await request.json();
+
+  // Get extracted content
+  const content = await getExtractionResults(extractionJobId);
+
+  // Get themes
+  const themes = await fetchThemes(themePageId, apiKey);
+
+  // Create classification job
+  const job = await jobManager.createJob('classification', extractionJobId);
+
+  // Classify each content item
+  for (const item of content) {
+    const mappings = await classifyContent(item, themes);
+    item.themes = mappings;
+    await jobManager.addResult(job.id, item);
+    await jobManager.updateProgress(job.id, ...);
+  }
+
+  return NextResponse.json({ jobId: job.id });
+}
+```
+
+**Validation:**
+- [ ] Classifies all content
+- [ ] Returns classified content
+- [ ] Progress tracking works
+
+---
+
+#### 10.8 Create Classification Review Component
+**Description:** UI to review and adjust classifications.
+
+**Files to Create:**
+- `components/classification-review.tsx`
+
+**Implementation:**
+- List content items
+- Show current theme mappings
+- Allow adding/removing themes
+- Adjust relevance scores
+- Bulk actions (apply same mapping to similar)
+- Save changes
+
+**Validation:**
+- [ ] Can view all classifications
+- [ ] Can adjust mappings
+- [ ] Changes persist
+- [ ] Good UX for review
+
+---
+
+#### 10.9 Create Theme Content View
+**Description:** View all content for a specific theme.
+
+**Files to Modify:**
+- `app/themes/[id]/page.tsx`
+
+**Implementation:**
+- Fetch aggregated content for theme
+- Show by content type
+- Filter by source (topper/user)
+- Filter by quality
+- Show cross-theme indicator
+
+**Validation:**
+- [ ] Shows all theme content
+- [ ] Filters work
+- [ ] Cross-theme content visible
+
+---
+
+#### 10.10 Integrate Classification into Workflow
+**Description:** Connect extraction → classification flow.
+
+**Files to Modify:**
+- `app/patterns/page.tsx`
+- `app/themes/page.tsx`
+
+**Implementation:**
+- After extraction, prompt to classify
+- Show classification progress
+- Navigate to theme view after completion
+
+**Validation:**
+- [ ] Smooth workflow
+- [ ] Progress visible
+- [ ] Results accessible
+
+---
+
+### Sprint 10 Completion Criteria
+- [ ] Content classified into themes
+- [ ] Cross-theme content handled
+- [ ] User content extracted and classified
+- [ ] Classification reviewable/adjustable
+- [ ] Content viewable per theme
+- [ ] All tests passing
+
+---
+
+## Sprint 11: Comparison & Gap Analysis
+
+**Goal:** Compare user content vs topper content per theme, identify gaps.
+
+**Demo:** Select theme → see what user has vs what toppers have → gap analysis with suggestions.
+
+### Tasks
+
+#### 11.1 Create Comparison Types
+**Description:** Define types for comparison results.
+
+**Files to Modify:**
+- `types/comparison.ts`
+
+**Implementation:**
+```typescript
+export interface ComparisonResult {
+  themeId: string;
+  themeName: string;
+
+  coverage: {
+    introductions: CoverageStat;
+    conclusions: CoverageStat;
+    examples: CoverageStat;
+    quotes: CoverageStat;
+    thinkers: CoverageStat;
+    arguments: CoverageStat;
+  };
+
+  gaps: Gap[];
+  suggestions: Suggestion[];
+  overallScore: number; // 0-100
+}
+
+export interface CoverageStat {
+  userCount: number;
+  topperCount: number;
+  userHas: string[];      // Content IDs
+  topperUnique: string[]; // Content IDs user is missing
+  overlapCount: number;
+}
+
+export interface Gap {
+  type: ContentType;
+  category?: ExampleCategory;
+  description: string;
+  severity: 'high' | 'medium' | 'low';
+  topperExamples: string[]; // Content IDs
+}
+
+export interface Suggestion {
+  type: 'add' | 'improve' | 'diversify';
+  description: string;
+  relatedContent: string[]; // Content IDs to reference
+}
+```
+
+**Validation:**
+- [ ] Types compile
+- [ ] Cover all comparison aspects
+
+---
+
+#### 11.2 Create Comparison Prompts
+**Description:** LLM prompts for comparison analysis.
+
+**Files to Create:**
+- `lib/llm/prompts/comparison.ts`
+
+**Implementation:**
+```typescript
+export const COMPARISON_SYSTEM_PROMPT = `
+You are comparing a UPSC aspirant's content against topper content for a theme.
+
+Analyze:
+1. COVERAGE: What types of content does user have vs toppers?
+2. GAPS: What valuable content are toppers using that user lacks?
+3. QUALITY: How does user content quality compare?
+4. SUGGESTIONS: Specific actionable improvements
+
+Focus on:
+- Diversity of examples (across categories)
+- Uniqueness (avoiding overused)
+- Cross-theme applicability
+- Revision-readiness
+`;
+```
+
+**Validation:**
+- [ ] Comparison is useful
+- [ ] Gaps identified correctly
+- [ ] Suggestions actionable
+
+---
+
+#### 11.3 Create Gap Analyzer
+**Description:** Analyze gaps between user and topper content.
+
+**Files to Create:**
+- `lib/comparison/gap-analyzer.ts`
+
+**Implementation:**
+```typescript
+export async function analyzeGaps(
+  userContent: ExtractedContent[],
+  topperContent: ExtractedContent[],
+  theme: MainTheme
+): Promise<ComparisonResult> {
+  // Calculate coverage stats
+  const coverage = calculateCoverage(userContent, topperContent);
+
+  // Use LLM to identify meaningful gaps
+  const gaps = await identifyGaps(userContent, topperContent, theme);
+
+  // Generate suggestions
+  const suggestions = await generateSuggestions(gaps, topperContent);
+
+  // Calculate overall score
+  const overallScore = calculateScore(coverage, gaps);
+
+  return { themeId: theme.id, themeName: theme.title, coverage, gaps, suggestions, overallScore };
+}
+```
+
+**Validation:**
+- [ ] Coverage calculated correctly
+- [ ] Gaps are meaningful
+- [ ] Score reflects reality
+
+---
+
+#### 11.4 Create Suggestion Generator
+**Description:** Generate actionable suggestions based on gaps.
+
+**Files to Create:**
+- `lib/comparison/suggestions.ts`
+
+**Implementation:**
+```typescript
+export async function generateSuggestions(
+  gaps: Gap[],
+  topperContent: ExtractedContent[]
+): Promise<Suggestion[]> {
+  // For each gap, suggest specific content to add
+  // Reference topper content as examples
+  // Prioritize by gap severity
+}
+
+export function prioritizeSuggestions(
+  suggestions: Suggestion[]
+): Suggestion[] {
+  // High impact, low effort first
+  // Diversification over quantity
+}
+```
+
+**Validation:**
+- [ ] Suggestions are specific
+- [ ] Reference real content
+- [ ] Prioritization sensible
+
+---
+
+#### 11.5 Create Compare API Route
+**Description:** API endpoint to run comparison.
+
+**Files to Create:**
+- `app/api/compare/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { themeId, userContentIds, topperContentIds } = await request.json();
+
+  // Get content
+  const userContent = await getContentByIds(userContentIds);
+  const topperContent = await getContentByIds(topperContentIds);
+  const theme = await getTheme(themeId);
+
+  // Run comparison
+  const result = await analyzeGaps(userContent, topperContent, theme);
+
+  return NextResponse.json(result);
+}
+```
+
+**Validation:**
+- [ ] Returns comparison result
+- [ ] Handles missing content gracefully
+
+---
+
+#### 11.6 Create Comparison Results Component
+**Description:** Display comparison results visually.
+
+**Files to Modify:**
+- `components/comparison-results.tsx`
+
+**Implementation:**
+- Coverage chart (user vs topper by type)
+- Gaps list with severity badges
+- Suggestions with expandable details
+- Overall score display
+- Link to topper content examples
+
+**Validation:**
+- [ ] Clear visualization
+- [ ] Gaps easy to understand
+- [ ] Suggestions actionable
+- [ ] Good UX
+
+---
+
+#### 11.7 Create Per-Theme Comparison Page
+**Description:** Dedicated comparison page per theme.
+
+**Files to Create:**
+- `app/themes/[id]/compare/page.tsx`
+
+**Implementation:**
+- Select user content sources
+- Show comparison results
+- Navigate to specific content
+- Actions to add missing content
+
+**Validation:**
+- [ ] Theme-specific comparison
+- [ ] Easy to navigate results
+- [ ] Actions work
+
+---
+
+#### 11.8 Create Global Comparison View
+**Description:** Compare across all themes at once.
+
+**Files to Modify:**
+- `app/compare/page.tsx`
+
+**Implementation:**
+- Summary cards per theme
+- Overall gaps across themes
+- Priority recommendations
+- Export comparison report
+
+**Validation:**
+- [ ] Shows all themes
+- [ ] Highlights biggest gaps
+- [ ] Export works
+
+---
+
+### Sprint 11 Completion Criteria
+- [ ] Comparison analysis works
+- [ ] Gaps identified per theme
+- [ ] Suggestions generated
+- [ ] Comparison UI complete
+- [ ] Per-theme and global views
+- [ ] All tests passing
+
+---
+
+## Sprint 12: Note Generation & Notion Sync
+
+**Goal:** Generate dual-section revision notes and sync to Notion.
+
+**Demo:** Generate notes for theme → preview dual-section format → sync to Notion → verify in Notion.
+
+### Tasks
+
+#### 12.1 Create Generation Types
+**Description:** Define types for generated notes.
+
+**Files to Create:**
+- `types/generation.ts`
+
+**Implementation:**
+```typescript
+export interface GeneratedNote {
+  id: string;
+  themeId: string;
+  themeName: string;
+  miniThemeId: string;
+  miniThemeName: string;
+
+  yourNotes: NoteSection;
+  topperInsights: NoteSection;
+
+  crossThemeRefs: CrossThemeRef[];
+  generatedAt: string;
+  syncedAt?: string;
+  notionPageId?: string;
+}
+
+export interface NoteSection {
+  content: string;        // Markdown formatted
+  items: NoteItem[];      // Structured items
+  wordCount: number;
+}
+
+export interface NoteItem {
+  type: 'key_point' | 'example' | 'quote' | 'argument' | 'thinker';
+  content: string;
+  sourceContentId?: string;
+}
+
+export interface CrossThemeRef {
+  content: string;
+  applicableThemes: string[];
+}
+```
+
+**Validation:**
+- [ ] Types compile
+- [ ] Cover dual-section format
+
+---
+
+#### 12.2 Create Generation Prompts
+**Description:** LLM prompts for note generation.
+
+**Files to Create:**
+- `lib/llm/prompts/generation.ts`
+
+**Implementation:**
+```typescript
+export const GENERATION_SYSTEM_PROMPT = `
+You are generating REVISION-READY notes for UPSC essay preparation.
+
+Generate TWO sections:
+
+## Your Notes
+- Distill user's content into KEY POINTS
+- Keep examples CONCISE
+- Format for quick scanning
+- Target: 200-300 words
+
+## Topper Insights
+- Add UNIQUE content user is missing
+- Focus on HIGH-QUALITY additions
+- Include cross-theme references
+- Target: 150-250 words
+
+CRITICAL: Both sections must be REVISION-READY.
+- Bullet points, not paragraphs
+- Scannable before an exam
+- Quality over quantity
+- No verbose explanations
+`;
+```
+
+**Validation:**
+- [ ] Notes are concise
+- [ ] Both sections balanced
+- [ ] Revision-ready format
+
+---
+
+#### 12.3 Create Note Generator
+**Description:** Main note generation logic.
+
+**Files to Create:**
+- `lib/generation/note-generator.ts`
+
+**Implementation:**
+```typescript
+export async function generateNotes(
+  theme: MainTheme,
+  miniTheme: MiniTheme,
+  userContent: ExtractedContent[],
+  topperContent: ExtractedContent[]
+): Promise<GeneratedNote> {
+  const prompt = createGenerationPrompt(theme, miniTheme, userContent, topperContent);
+
+  const result = await generateObject({
+    model: provider(getModelForTask('generation')),
+    schema: GeneratedNoteSchema,
+    prompt,
+  });
+
+  // Enforce conciseness
+  const finalNote = enforceConciseness(result);
+
+  // Find cross-theme references
+  const crossThemeRefs = findCrossThemeRefs(topperContent);
+
+  return {
+    id: crypto.randomUUID(),
+    themeId: theme.id,
+    themeName: theme.title,
+    miniThemeId: miniTheme.id,
+    miniThemeName: miniTheme.title,
+    ...finalNote,
+    crossThemeRefs,
+    generatedAt: new Date().toISOString(),
+  };
+}
+```
+
+**Validation:**
+- [ ] Notes generated correctly
+- [ ] Dual-section format
+- [ ] Cross-theme refs included
+
+---
+
+#### 12.4 Create Conciseness Enforcer
+**Description:** Ensure notes are revision-ready length.
+
+**Files to Create:**
+- `lib/generation/conciseness.ts`
+
+**Implementation:**
+```typescript
+const MAX_YOUR_NOTES_WORDS = 350;
+const MAX_TOPPER_INSIGHTS_WORDS = 300;
+
+export function enforceConciseness(note: GeneratedNote): GeneratedNote {
+  // Count words
+  // If over limit, use LLM to trim
+  // Preserve most important points
+  // Return trimmed version
+}
+
+export function validateConciseness(note: GeneratedNote): {
+  valid: boolean;
+  yourNotesWords: number;
+  topperInsightsWords: number;
+} {
+  // Check word counts
+}
+```
+
+**Validation:**
+- [ ] Notes within word limits
+- [ ] Important content preserved
+- [ ] Trimming maintains quality
+
+---
+
+#### 12.5 Create Notion Block Builder
+**Description:** Convert notes to Notion blocks.
+
+**Files to Create:**
+- `lib/notion/block-builder.ts`
+
+**Implementation:**
+```typescript
+export function noteToNotionBlocks(note: GeneratedNote): NotionBlock[] {
+  return [
+    // Theme header
+    createHeading2(`${note.themeName} > ${note.miniThemeName}`),
+
+    // Your Notes section
+    createHeading3('Your Notes'),
+    ...note.yourNotes.items.map(item => createBullet(item.content)),
+
+    // Divider
+    createDivider(),
+
+    // Topper Insights section
+    createHeading3('Topper Insights'),
+    ...note.topperInsights.items.map(item => createBullet(item.content)),
+
+    // Cross-theme references
+    ...(note.crossThemeRefs.length > 0 ? [
+      createCallout('Cross-applicable', note.crossThemeRefs.map(r => r.content).join(', ')),
+    ] : []),
+  ];
+}
+```
+
+**Validation:**
+- [ ] Valid Notion blocks
+- [ ] Formatting preserved
+- [ ] All sections included
+
+---
+
+#### 12.6 Create Notion Destination Config
+**Description:** UI to configure where notes sync to.
+
+**Files to Modify:**
+- `app/settings/page.tsx`
+
+**Implementation:**
+- Add "Output Destination" section
+- Notion page search/select
+- Test connection to destination
+- Show currently configured destination
+
+**Validation:**
+- [ ] Can select destination page
+- [ ] Selection persists
+- [ ] Test connection works
+
+---
+
+#### 12.7 Create Notion Sync API
+**Description:** API endpoint to sync notes to Notion.
+
+**Files to Modify:**
+- `app/api/notion/sync/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { noteId, destinationPageId, apiKey } = await request.json();
+
+  // Get note
+  const note = await getNote(noteId);
+
+  // Convert to Notion blocks
+  const blocks = noteToNotionBlocks(note);
+
+  // Append to destination page
+  const client = new NotionClient(apiKey);
+  await client.appendBlocks(destinationPageId, blocks);
+
+  // Update note with sync info
+  note.syncedAt = new Date().toISOString();
+  note.notionPageId = destinationPageId;
+  await saveNote(note);
+
+  return NextResponse.json({ success: true });
+}
+```
+
+**Validation:**
+- [ ] Notes appear in Notion
+- [ ] Formatting correct
+- [ ] Sync timestamp updated
+
+---
+
+#### 12.8 Create Generate API Route
+**Description:** API endpoint to generate notes.
+
+**Files to Create:**
+- `app/api/generate/route.ts`
+
+**Implementation:**
+```typescript
+export async function POST(request: NextRequest) {
+  const { themeId, miniThemeId } = await request.json();
+
+  // Get theme and content
+  const theme = await getTheme(themeId);
+  const miniTheme = theme.miniThemes.find(m => m.id === miniThemeId);
+  const content = await getThemeContent(themeId, miniThemeId);
+
+  // Generate notes
+  const note = await generateNotes(
+    theme,
+    miniTheme,
+    content.filter(c => c.sourceType === 'user'),
+    content.filter(c => c.sourceType === 'topper')
+  );
+
+  // Save note
+  await saveNote(note);
+
+  return NextResponse.json(note);
+}
+```
+
+**Validation:**
+- [ ] Notes generated for theme
+- [ ] Both sections present
+- [ ] Note saved correctly
+
+---
+
+#### 12.9 Create Notes Preview Component
+**Description:** Preview generated notes before sync.
+
+**Files to Modify:**
+- `components/revision-note.tsx`
+
+**Implementation:**
+- Dual-section display
+- Markdown rendering
+- Word count display
+- Edit capability (optional)
+- Sync to Notion button
+- Regenerate button
+
+**Validation:**
+- [ ] Shows both sections
+- [ ] Markdown rendered
+- [ ] Actions work
+
+---
+
+#### 12.10 Create Sync Status Component
+**Description:** Show sync status and history.
+
+**Files to Create:**
+- `components/sync-status.tsx`
+
+**Implementation:**
+- Last sync timestamp
+- Sync in progress indicator
+- Error display
+- Link to Notion page
+- Sync all notes button
+
+**Validation:**
+- [ ] Status accurate
+- [ ] Errors displayed
+- [ ] Links work
+
+---
+
+#### 12.11 Integrate Notes into Theme Page
+**Description:** Show/generate notes on theme detail page.
+
+**Files to Modify:**
+- `app/themes/[id]/page.tsx`
+
+**Implementation:**
+- "Generate Notes" button per mini-theme
+- Show existing notes
+- Regenerate option
+- Sync button
+
+**Validation:**
+- [ ] Can generate from theme page
+- [ ] Notes displayed
+- [ ] Sync works
+
+---
+
+#### 12.12 Create Notes List Page
+**Description:** Browse all generated notes.
+
+**Files to Modify:**
+- `app/notes/page.tsx`
+
+**Implementation:**
+- List all generated notes
+- Group by theme
+- Show sync status
+- Bulk sync option
+- Search/filter
+
+**Validation:**
+- [ ] All notes listed
+- [ ] Grouping correct
+- [ ] Bulk actions work
+
+---
+
+### Sprint 12 Completion Criteria
+- [ ] Notes generated in dual-section format
+- [ ] Notes are concise and revision-ready
+- [ ] Notion destination configurable
+- [ ] Notes sync to Notion correctly
+- [ ] Sync status tracked
+- [ ] All tests passing
 
 ---
 
 ## Testing Strategy
+
+### Unit Tests
+- `lib/storage/*.test.ts` - R2 client and signed URLs
+- `lib/pdf/*.test.ts` - PDF streaming and rendering
+- `lib/extraction/*.test.ts` - Content extraction
+- `lib/classification/*.test.ts` - Theme classification
+- `lib/comparison/*.test.ts` - Gap analysis
+- `lib/generation/*.test.ts` - Note generation
+- `lib/notion/*.test.ts` - Notion client and parsers
+- `lib/llm/*.test.ts` - LLM provider and utilities
+
+### API Tests
+- Test each API route with various inputs
+- Mock LLM responses for deterministic tests
+- Test error handling and edge cases
+
+### Component Tests
+- Render tests with React Testing Library
+- Interaction tests for forms and buttons
+- Loading and error state tests
+
+### Integration Tests
+- Full pipeline: Upload → OCR → Extract → Classify → Generate → Sync
+- Notion integration with real API (manual)
+- R2 integration (manual)
+
+### Validation Checklist Per Task
+Each task includes specific validation criteria that serve as acceptance tests.
 
 ### Unit Tests
 - `lib/notion/*.test.ts` - Notion client and parsers

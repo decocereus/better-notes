@@ -1,50 +1,49 @@
-import { del } from "@vercel/blob";
 import { type NextRequest, NextResponse } from "next/server";
+import { deleteFromR2, validateR2Config } from "@/lib/storage";
 
 /**
  * POST /api/upload/delete
- * Deletes a file from Vercel Blob storage.
+ * Deletes a file from R2 storage.
  *
  * Expects JSON body with:
- * - url: The blob URL to delete (required)
+ * - key: The R2 key to delete (required)
  */
 export async function POST(request: NextRequest) {
 	try {
+		// Validate R2 configuration
+		const { valid, missing } = validateR2Config();
+		if (!valid) {
+			return NextResponse.json(
+				{
+					error: "R2 storage not configured",
+					details: `Missing: ${missing.join(", ")}`,
+				},
+				{ status: 503 }
+			);
+		}
+
 		const body = await request.json();
-		const { url } = body as { url?: string };
+		const { key } = body as { key?: string };
 
-		if (!url) {
-			return NextResponse.json({ error: "URL is required" }, { status: 400 });
+		if (!key) {
+			return NextResponse.json({ error: "Key is required" }, { status: 400 });
 		}
 
-		// Validate URL is a Vercel Blob URL
-		if (!url.includes("blob.vercel-storage.com")) {
-			return NextResponse.json({ error: "Invalid blob URL" }, { status: 400 });
+		// Validate key format (should be a project file key)
+		if (!key.startsWith("projects/")) {
+			return NextResponse.json({ error: "Invalid R2 key" }, { status: 400 });
 		}
 
-		// Delete from Vercel Blob
-		await del(url);
+		// Delete from R2
+		await deleteFromR2(key);
 
 		return NextResponse.json({ success: true });
 	} catch (error) {
 		console.error("Delete failed:", error);
 
-		// Check for specific Vercel Blob errors
+		// R2 doesn't error on missing keys, so most errors are config issues
 		if (error instanceof Error) {
-			if (error.message.includes("BLOB_READ_WRITE_TOKEN")) {
-				return NextResponse.json(
-					{
-						error:
-							"Storage not configured. Please set BLOB_READ_WRITE_TOKEN environment variable.",
-					},
-					{ status: 500 }
-				);
-			}
-
-			// Blob not found is not an error for us - consider it successful
-			if (error.message.includes("not found")) {
-				return NextResponse.json({ success: true });
-			}
+			return NextResponse.json({ error: error.message }, { status: 500 });
 		}
 
 		return NextResponse.json({ error: "Delete failed" }, { status: 500 });

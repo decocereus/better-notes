@@ -37,18 +37,21 @@ export function useLocalStorage<T>(
 	// Persist to localStorage
 	const setValue = useCallback(
 		(value: T | ((prev: T) => T)) => {
-			try {
-				// Allow value to be a function for prev state pattern
-				const valueToStore =
-					value instanceof Function ? value(storedValue) : value;
+			setStoredValue((prevStoredValue) => {
+				try {
+					// Allow value to be a function for prev state pattern
+					const valueToStore =
+						value instanceof Function ? value(prevStoredValue) : value;
 
-				setStoredValue(valueToStore);
-				window.localStorage.setItem(key, JSON.stringify(valueToStore));
-			} catch (error) {
-				console.warn(`Error setting localStorage key "${key}":`, error);
-			}
+					window.localStorage.setItem(key, JSON.stringify(valueToStore));
+					return valueToStore;
+				} catch (error) {
+					console.warn(`Error setting localStorage key "${key}":`, error);
+					return prevStoredValue;
+				}
+			});
 		},
-		[key, storedValue]
+		[key]
 	);
 
 	return [storedValue, setValue, isHydrated];

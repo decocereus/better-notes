@@ -1,12 +1,14 @@
 "use client";
 
+import { useQuery } from "convex/react";
 import { ArrowRight, Clock, FileText, FolderKanban } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { useProjects } from "@/lib/hooks/use-projects";
+import { api } from "@/convex/_generated/api";
+import type { Project } from "@/types/project";
 
 /**
  * Formats a date string to a relative time (e.g., "2 hours ago")
@@ -103,10 +105,12 @@ interface RecentProjectsProps {
 }
 
 export function RecentProjects({ limit = 5 }: RecentProjectsProps) {
-	const { projects, isHydrated, recentProjects } = useProjects();
+	const projects = useQuery(api.projects.recent, { limit }) as
+		| Project[]
+		| undefined;
 
-	// Show loading state until hydrated
-	if (!isHydrated) {
+	// Show loading state while query is pending
+	if (projects === undefined) {
 		return (
 			<Card className="p-4">
 				<div className="flex items-center justify-between">
@@ -119,7 +123,6 @@ export function RecentProjects({ limit = 5 }: RecentProjectsProps) {
 		);
 	}
 
-	const recent = recentProjects(limit);
 	const hasProjects = projects.length > 0;
 
 	return (
@@ -138,7 +141,7 @@ export function RecentProjects({ limit = 5 }: RecentProjectsProps) {
 
 			{hasProjects ? (
 				<div className="-mx-3 divide-y">
-					{recent.map((project) => (
+					{projects.map((project) => (
 						<ProjectItem
 							description={project.description}
 							id={project.id}

@@ -11,14 +11,11 @@ vi.mock("@/lib/hooks/use-settings", () => ({
 	})),
 }));
 
-vi.mock("@/lib/hooks/use-projects", () => ({
-	useProjects: vi.fn(() => ({
-		projects: [],
-		isHydrated: true,
-	})),
+vi.mock("convex/react", () => ({
+	useQuery: vi.fn(() => []),
 }));
 
-import { useProjects } from "@/lib/hooks/use-projects";
+import { useQuery } from "convex/react";
 import { useSettings } from "@/lib/hooks/use-settings";
 // Import after mocks
 import { DashboardStats } from "../dashboard-stats";
@@ -29,6 +26,7 @@ describe("DashboardStats", () => {
 	});
 
 	it("renders stats cards with default values when no data", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
 
 		expect(screen.getByText("Main Themes")).toBeInTheDocument();
@@ -38,40 +36,29 @@ describe("DashboardStats", () => {
 	});
 
 	it("shows project count from hook", () => {
-		vi.mocked(useProjects).mockReturnValue({
-			projects: [
-				{
-					id: "1",
-					name: "Test",
-					createdAt: "",
-					updatedAt: "",
-					sources: [],
-				},
-				{
-					id: "2",
-					name: "Test2",
-					createdAt: "",
-					updatedAt: "",
-					sources: [],
-				},
-			],
-			isHydrated: true,
-			createProject: vi.fn(),
-			getProject: vi.fn(),
-			updateProject: vi.fn(),
-			deleteProject: vi.fn(),
-			addSource: vi.fn(),
-			updateSource: vi.fn(),
-			removeSource: vi.fn(),
-			recentProjects: vi.fn(),
-			refresh: vi.fn(),
-		});
+		vi.mocked(useQuery).mockReturnValue([
+			{
+				id: "1",
+				name: "Test",
+				createdAt: "",
+				updatedAt: "",
+				sources: [],
+			},
+			{
+				id: "2",
+				name: "Test2",
+				createdAt: "",
+				updatedAt: "",
+				sources: [],
+			},
+		]);
 
 		render(<DashboardStats />);
 		expect(screen.getByText("2")).toBeInTheDocument();
 	});
 
 	it("renders connection status section", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
 
 		expect(screen.getByText("Connection Status")).toBeInTheDocument();
@@ -81,6 +68,7 @@ describe("DashboardStats", () => {
 	});
 
 	it("shows not configured when Notion is not connected", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
@@ -98,11 +86,13 @@ describe("DashboardStats", () => {
 	});
 
 	it("shows using defaults for LLM when no custom config", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
 		expect(screen.getByText("Using defaults")).toBeInTheDocument();
 	});
 
 	it("shows custom config when model config exists", () => {
+		vi.mocked(useQuery).mockReturnValue([]);
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {
 				modelConfig: { ocr: "custom-model" },

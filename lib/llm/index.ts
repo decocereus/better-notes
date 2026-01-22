@@ -5,7 +5,6 @@
  * and utilities for working with language models.
  */
 
-// biome-ignore lint/performance/noBarrelFile: Intentional barrel export for clean imports (AD-003)
 export {
 	// Constants
 	AVAILABLE_MODELS,

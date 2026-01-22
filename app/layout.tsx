@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import "./globals.css";
 
@@ -18,8 +19,10 @@ export default function RootLayout({
 }>) {
 	return (
 		<html className={inter.variable} lang="en">
-			<body className="font-sans antialiased">
-				<AppShell>{children}</AppShell>
+			<body className="dark font-sans antialiased">
+				<ConvexClientProvider>
+					<AppShell>{children}</AppShell>
+				</ConvexClientProvider>
 			</body>
 		</html>
 	);

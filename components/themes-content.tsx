@@ -32,23 +32,36 @@ interface ThemesData {
  * Handles Notion connection check, theme page selection, and data fetching.
  */
 export function ThemesContent() {
-	const {
-		settings,
-		isHydrated,
-		isNotionConnected,
-		hasThemePage,
-		updateSettings,
-	} = useSettings();
+	const { settings, isHydrated, hasThemePage, updateSettings } = useSettings();
 
 	const [themesData, setThemesData] = useState<ThemesData | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [isCheckingConnection, setIsCheckingConnection] = useState(true);
+	const [isConnected, setIsConnected] = useState(false);
+
+	// Check actual connection status via API (handles env variable)
+	useEffect(() => {
+		async function checkConnection() {
+			try {
+				const response = await fetch("/api/notion/connect", { method: "GET" });
+				const data = (await response.json()) as { valid: boolean };
+				setIsConnected(data.valid);
+			} catch {
+				setIsConnected(false);
+			} finally {
+				setIsCheckingConnection(false);
+			}
+		}
+
+		checkConnection();
+	}, []);
 
 	/**
 	 * Fetches themes from the API.
 	 */
 	const fetchThemes = useCallback(async () => {
-		if (!(settings.notionApiKey && settings.themePageId)) {
+		if (!settings.themePageId) {
 			return;
 		}
 
@@ -60,7 +73,6 @@ export function ThemesContent() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					apiKey: settings.notionApiKey,
 					pageId: settings.themePageId,
 				}),
 			});
@@ -82,28 +94,23 @@ export function ThemesContent() {
 		} finally {
 			setIsLoading(false);
 		}
-	}, [
-		settings.notionApiKey,
-		settings.themePageId,
-		settings.themePageTitle,
-		updateSettings,
-	]);
+	}, [settings.themePageId, settings.themePageTitle, updateSettings]);
 
 	// Fetch themes when page ID changes
 	useEffect(() => {
-		if (isHydrated && settings.notionApiKey && settings.themePageId) {
+		if (isHydrated && isConnected && settings.themePageId) {
 			fetchThemes();
 		}
-	}, [isHydrated, settings.notionApiKey, settings.themePageId, fetchThemes]);
+	}, [isHydrated, isConnected, settings.themePageId, fetchThemes]);
 
 	/**
 	 * Handles theme page selection from search.
 	 */
 	const handlePageSelect = useCallback(
-		(page: { id: string; title: string }) => {
+		(pageId: string, pageTitle: string) => {
 			updateSettings({
-				themePageId: page.id,
-				themePageTitle: page.title,
+				themePageId: pageId,
+				themePageTitle: pageTitle,
 			});
 		},
 		[updateSettings]
@@ -120,8 +127,8 @@ export function ThemesContent() {
 		setThemesData(null);
 	}, [updateSettings]);
 
-	// Show loading during hydration
-	if (!isHydrated) {
+	// Show loading during hydration or connection check
+	if (!isHydrated || isCheckingConnection) {
 		return (
 			<div className="flex items-center justify-center py-12">
 				<LoadingSpinner />
@@ -130,18 +137,13 @@ export function ThemesContent() {
 	}
 
 	// Show setup prompt if Notion not connected
-	if (!isNotionConnected) {
+	if (!isConnected) {
 		return <NotConnectedState />;
 	}
 
 	// Show page selector if no theme page selected
 	if (!hasThemePage) {
-		return (
-			<PageSelectorState
-				apiKey={settings.notionApiKey ?? ""}
-				onSelect={handlePageSelect}
-			/>
-		);
+		return <PageSelectorState onSelect={handlePageSelect} />;
 	}
 
 	return (
@@ -245,7 +247,8 @@ function NotConnectedState() {
 				</div>
 				<h3 className="font-medium text-lg">Connect Notion First</h3>
 				<p className="mt-1 max-w-sm text-muted-foreground text-sm">
-					Connect your Notion account to view your essay themes.
+					Connect your Notion account to view your essay themes. Set
+					NOTION_API_KEY in .env.local or configure in Settings.
 				</p>
 				<Link href="/settings">
 					<Button className="mt-4">Go to Settings</Button>
@@ -256,14 +259,13 @@ function NotConnectedState() {
 }
 
 interface PageSelectorStateProps {
-	apiKey: string;
-	onSelect: (page: { id: string; title: string }) => void;
+	onSelect: (pageId: string, pageTitle: string) => void;
 }
 
 /**
  * State shown when Notion is connected but no theme page selected.
  */
-function PageSelectorState({ apiKey, onSelect }: PageSelectorStateProps) {
+function PageSelectorState({ onSelect }: PageSelectorStateProps) {
 	const [searchError, setSearchError] = useState<string | null>(null);
 
 	return (
@@ -292,11 +294,10 @@ function PageSelectorState({ apiKey, onSelect }: PageSelectorStateProps) {
 					)}
 
 					<NotionPageSearch
-						apiKey={apiKey}
 						onError={setSearchError}
-						onSelect={(page) => {
+						onSelect={(pageId, pageTitle) => {
 							setSearchError(null);
-							onSelect(page);
+							onSelect(pageId, pageTitle);
 						}}
 						placeholder="Search for your themes page..."
 					/>

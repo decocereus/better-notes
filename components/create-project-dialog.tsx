@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation } from "convex/react";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -15,17 +16,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { Project } from "@/types/project";
+import { api } from "@/convex/_generated/api";
 
 interface CreateProjectDialogProps {
 	trigger: React.ReactNode;
-	onProjectCreated?: (project: Project) => void;
+	onProjectCreated?: (projectId: string) => void;
 }
 
 export function CreateProjectDialog({
 	trigger,
 	onProjectCreated,
 }: CreateProjectDialogProps) {
+	const createProject = useMutation(api.projects.create);
+
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
@@ -45,28 +48,17 @@ export function CreateProjectDialog({
 		setIsLoading(true);
 
 		try {
-			const response = await fetch("/api/projects", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					name: trimmedName,
-					description: description.trim() || undefined,
-				}),
-			});
-
-			if (!response.ok) {
-				const data = await response.json();
-				throw new Error(data.error || "Failed to create project");
-			}
-
-			const { project } = (await response.json()) as { project: Project };
+			const projectId = (await createProject({
+				name: trimmedName,
+				description: description.trim() || undefined,
+			})) as string;
 
 			// Reset form
 			setName("");
 			setDescription("");
 			setOpen(false);
 
-			onProjectCreated?.(project);
+			onProjectCreated?.(projectId);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to create project");
 		} finally {

@@ -1,4 +1,10 @@
-import { put } from "@vercel/blob";
+/**
+ * API route for file uploads.
+ * Supports both direct upload (small files) and returns signed URL for large files.
+ *
+ * For large files (>10MB), clients should use /api/storage/upload-url for direct R2 upload.
+ */
+
 import { type NextRequest, NextResponse } from "next/server";
 import {
 	ALLOWED_FILE_TYPES_DISPLAY,
@@ -8,22 +14,40 @@ import {
 	MAX_FILE_SIZE_DISPLAY,
 	MIME_TO_SOURCE_TYPE,
 } from "@/lib/constants/upload";
+import {
+	generateProjectFileKey,
+	uploadToR2,
+	validateR2Config,
+} from "@/lib/storage";
 
 /**
  * Response type for successful upload
  */
 export interface UploadResponse {
+	/** R2 key for the uploaded file */
+	key: string;
+	/** Public URL or signed URL for accessing the file */
 	url: string;
+	/** Original filename */
 	filename: string;
+	/** File size in bytes */
 	size: number;
+	/** Human-readable file size */
 	sizeFormatted: string;
+	/** MIME type */
 	type: string;
+	/** Content source type for the project */
 	sourceType: "pdf" | "image";
 }
 
+/** Threshold for recommending direct R2 upload (10MB) */
+const DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024;
+
 /**
  * POST /api/upload
- * Handles file uploads to Vercel Blob storage.
+ * Handles file uploads to R2 storage.
+ *
+ * For files > 10MB, returns a recommendation to use direct R2 upload.
  *
  * Expects multipart form data with:
  * - file: The file to upload (required)
@@ -31,6 +55,19 @@ export interface UploadResponse {
  */
 export async function POST(request: NextRequest) {
 	try {
+		// Validate R2 configuration
+		const { valid, missing } = validateR2Config();
+		if (!valid) {
+			return NextResponse.json(
+				{
+					error: "R2 storage not configured",
+					details: `Missing: ${missing.join(", ")}`,
+					hint: "Please set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME",
+				},
+				{ status: 503 }
+			);
+		}
+
 		const formData = await request.formData();
 		const file = formData.get("file") as File | null;
 		const projectId = formData.get("projectId") as string | null;
@@ -65,21 +102,34 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: "File is empty" }, { status: 400 });
 		}
 
-		// Create a safe filename
-		const timestamp = Date.now();
-		const safeFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-		const blobPath = projectId
-			? `projects/${projectId}/${timestamp}-${safeFilename}`
-			: `uploads/${timestamp}-${safeFilename}`;
+		// For large files, recommend using direct R2 upload
+		if (file.size > DIRECT_UPLOAD_THRESHOLD) {
+			return NextResponse.json(
+				{
+					error: "File too large for server upload",
+					hint: "Use /api/storage/upload-url for direct R2 upload with progress tracking",
+					threshold: DIRECT_UPLOAD_THRESHOLD,
+					fileSize: file.size,
+				},
+				{ status: 413 }
+			);
+		}
 
-		// Upload to Vercel Blob
-		const blob = await put(blobPath, file, {
-			access: "public",
-			contentType: file.type,
+		// Generate R2 key
+		const resolvedProjectId = projectId ?? "unassigned";
+		const key = generateProjectFileKey(resolvedProjectId, file.name);
+
+		// Upload to R2
+		const buffer = Buffer.from(await file.arrayBuffer());
+		await uploadToR2(key, buffer, file.type, {
+			originalFilename: file.name,
+			projectId: resolvedProjectId,
+			uploadedAt: new Date().toISOString(),
 		});
 
 		const response: UploadResponse = {
-			url: blob.url,
+			key,
+			url: key, // For R2, we use the key; clients should use /api/storage/read-url to get signed URL
 			filename: file.name,
 			size: file.size,
 			sizeFormatted: formatFileSize(file.size),
@@ -91,17 +141,17 @@ export async function POST(request: NextRequest) {
 	} catch (error) {
 		console.error("Upload failed:", error);
 
-		// Check for specific Vercel Blob errors
+		// Check for R2 configuration errors
 		if (
 			error instanceof Error &&
-			error.message.includes("BLOB_READ_WRITE_TOKEN")
+			error.message.includes("R2 configuration missing")
 		) {
 			return NextResponse.json(
 				{
-					error:
-						"Storage not configured. Please set BLOB_READ_WRITE_TOKEN environment variable.",
+					error: "Storage not configured",
+					hint: "Please set R2 environment variables",
 				},
-				{ status: 500 }
+				{ status: 503 }
 			);
 		}
 
