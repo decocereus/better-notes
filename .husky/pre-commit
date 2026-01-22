@@ -1,0 +1,15 @@
+
+#!/bin/sh
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# 1. Lint and format staged files
+echo "📝 Linting staged files..."
+bun x lint-staged
+
+# 2. Run type check
+echo "🔎 Type checking..."
+bun run typecheck
+
+echo "✅ Pre-commit checks passed!"
