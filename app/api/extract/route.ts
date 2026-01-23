@@ -3,6 +3,8 @@
  * Starts and manages content extraction jobs from OCR results.
  *
  * POST: Start a new extraction job
+ *   - With assetId: Uses new per-page OCR format from R2
+ *   - With ocrJobId: Uses legacy OCR job results format
  * GET: Get job status and results
  */
 
@@ -31,8 +33,10 @@ import type {
 	ExtractionParameters,
 } from "@/types/extraction";
 import { DEFAULT_EXTRACTION_PARAMETERS } from "@/types/extraction";
+import type { PageOcrResult } from "@/types/ocr";
 import type {
 	OcrJobResults,
+	OcrPageResult,
 	StartExtractionJobInput,
 } from "@/types/processing";
 
@@ -41,7 +45,8 @@ import type {
  */
 interface ExtractionJobResults {
 	jobId: string;
-	ocrJobId: string;
+	ocrJobId?: string;
+	assetId?: string;
 	sourceKey: string;
 	totalEssays: number;
 	essays: EssayExtractionResult[];
@@ -52,29 +57,91 @@ interface ExtractionJobResults {
 }
 
 /**
- * POST /api/extract
- * Starts a new extraction job from OCR results.
+ * Converts new PageOcrResult format to legacy OcrPageResult format.
+ * The formats are mostly compatible, just need to add hasHandwriting field.
  */
-export async function POST(request: NextRequest) {
-	try {
-		// Validate configurations
-		const r2Config = validateR2Config();
-		if (!r2Config.valid) {
-			return NextResponse.json(
+function convertToLegacyOcrFormat(pages: PageOcrResult[]): OcrPageResult[] {
+	return pages.map((page) => ({
+		pageNumber: page.pageNumber,
+		text: page.text,
+		confidence: page.confidence,
+		wordCount: page.wordCount,
+		hasHandwriting: true, // Assume handwritten for UPSC essays
+		processingTimeMs: page.processingTimeMs,
+	}));
+}
+
+/**
+ * Validates that required services are configured.
+ */
+function validateRequiredConfigs():
+	| { valid: true }
+	| { valid: false; response: NextResponse } {
+	const r2Config = validateR2Config();
+	if (!r2Config.valid) {
+		return {
+			valid: false,
+			response: NextResponse.json(
 				{
 					error: "R2 storage not configured",
 					details: `Missing: ${r2Config.missing.join(", ")}`,
 				},
 				{ status: 503 }
-			);
-		}
+			),
+		};
+	}
 
-		const aiConfig = validateAIConfig();
-		if (!aiConfig.valid) {
-			return NextResponse.json(
+	const aiConfig = validateAIConfig();
+	if (!aiConfig.valid) {
+		return {
+			valid: false,
+			response: NextResponse.json(
 				{ error: aiConfig.error || "AI not configured" },
 				{ status: 503 }
-			);
+			),
+		};
+	}
+
+	return { valid: true };
+}
+
+/**
+ * Updates asset status in Convex when starting extraction.
+ */
+async function updateAssetExtractionStatus(
+	assetId: string,
+	jobId: string
+): Promise<void> {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return;
+	}
+
+	const { ConvexHttpClient } = await import("convex/browser");
+	const { api } = await import("@/convex/_generated/api");
+	const convex = new ConvexHttpClient(convexUrl);
+
+	await convex.mutation(api.assets.updateStatus, {
+		id: assetId as never,
+		status: "extraction_processing",
+		extractionJobId: jobId,
+	});
+}
+
+/**
+ * POST /api/extract
+ * Starts a new extraction job from OCR results.
+ *
+ * Supports two modes:
+ * - assetId only: Uses new per-page OCR format from R2
+ * - ocrJobId: Uses legacy OCR job results format
+ */
+export async function POST(request: NextRequest) {
+	try {
+		// Validate configurations
+		const configCheck = validateRequiredConfigs();
+		if (!configCheck.valid) {
+			return configCheck.response;
 		}
 
 		// Parse request
@@ -84,42 +151,11 @@ export async function POST(request: NextRequest) {
 		};
 		const { ocrJobId, parameters, assetId } = body;
 
-		if (!ocrJobId) {
+		// Need either assetId or ocrJobId
+		if (!(assetId || ocrJobId)) {
 			return NextResponse.json(
-				{ error: "ocrJobId is required" },
+				{ error: "Either assetId or ocrJobId is required" },
 				{ status: 400 }
-			);
-		}
-
-		// Get the OCR job to verify it's completed
-		const ocrJob = await getJob(ocrJobId);
-		if (!ocrJob) {
-			return NextResponse.json({ error: "OCR job not found" }, { status: 404 });
-		}
-
-		if (ocrJob.status !== "completed") {
-			return NextResponse.json(
-				{
-					error: "OCR job not completed",
-					status: ocrJob.status,
-					progress: ocrJob.progress,
-				},
-				{ status: 400 }
-			);
-		}
-
-		// Load OCR results
-		const ocrResultsKey = `processing/${ocrJobId}/ocr-results.json`;
-		let ocrResults: OcrJobResults;
-
-		try {
-			const { body: stream } = await downloadFromR2(ocrResultsKey);
-			const text = await streamToString(stream);
-			ocrResults = JSON.parse(text) as OcrJobResults;
-		} catch {
-			return NextResponse.json(
-				{ error: "Failed to load OCR results" },
-				{ status: 500 }
 			);
 		}
 
@@ -129,30 +165,23 @@ export async function POST(request: NextRequest) {
 			...parameters,
 		};
 
+		// Load OCR results from appropriate source
+		const ocrData = await loadOcrResults(assetId, ocrJobId);
+		if (!ocrData.success) {
+			return NextResponse.json(
+				{ error: ocrData.error, status: ocrData.jobStatus },
+				{ status: ocrData.status }
+			);
+		}
+
+		const { results: ocrResults, sourceKey, projectId } = ocrData;
+
 		// Create the extraction job
-		// We don't know essay count yet, will update after detection
-		const job = await createJob(
-			"extraction",
-			ocrJob.sourceKey,
-			ocrJob.projectId,
-			1 // Initial estimate, will update
-		);
+		const job = await createJob("extraction", sourceKey, projectId, 1);
 
 		// Update asset status if provided
 		if (assetId) {
-			const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-			if (convexUrl) {
-				const { ConvexHttpClient } = await import("convex/browser");
-				const { api } = await import("@/convex/_generated/api");
-				const convex = new ConvexHttpClient(convexUrl);
-
-				// assetId is a string from the request, Convex validates at runtime
-				await convex.mutation(api.assets.updateStatus, {
-					id: assetId as never,
-					status: "extraction_processing",
-					extractionJobId: job.id,
-				});
-			}
+			await updateAssetExtractionStatus(assetId, job.id);
 		}
 
 		// Start processing in the background
@@ -171,8 +200,9 @@ export async function POST(request: NextRequest) {
 			{
 				jobId: job.id,
 				status: job.status,
-				ocrJobId,
-				sourceKey: ocrJob.sourceKey,
+				ocrJobId: ocrJobId || undefined,
+				assetId: assetId || undefined,
+				sourceKey,
 			},
 			{ status: 202 }
 		);
@@ -185,6 +215,165 @@ export async function POST(request: NextRequest) {
 			},
 			{ status: 500 }
 		);
+	}
+}
+
+/**
+ * Loads OCR results from either asset (new format) or job (legacy format).
+ */
+function loadOcrResults(
+	assetId: string | undefined,
+	ocrJobId: string | undefined
+): Promise<
+	| {
+			success: true;
+			results: OcrJobResults;
+			sourceKey: string;
+			projectId?: string;
+	  }
+	| { success: false; error: string; status: number; jobStatus?: string }
+> {
+	if (assetId && !ocrJobId) {
+		return loadOcrResultsFromAsset(assetId);
+	}
+	if (ocrJobId) {
+		return loadLegacyOcrResults(ocrJobId);
+	}
+	return Promise.resolve({
+		success: false,
+		error: "Invalid request",
+		status: 400,
+	});
+}
+
+/**
+ * Loads OCR results from the new per-page format for an asset.
+ */
+async function loadOcrResultsFromAsset(assetId: string): Promise<
+	| {
+			success: true;
+			results: OcrJobResults;
+			sourceKey: string;
+			projectId?: string;
+	  }
+	| { success: false; error: string; status: number }
+> {
+	// Import dynamically to avoid loading at module level
+	const { getAllOcrResults } = await import("@/lib/storage/ocr-results");
+
+	// Get asset info from Convex
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return { success: false, error: "Convex not configured", status: 503 };
+	}
+
+	const { ConvexHttpClient } = await import("convex/browser");
+	const { api } = await import("@/convex/_generated/api");
+	const convex = new ConvexHttpClient(convexUrl);
+
+	const asset = await convex.query(api.assets.get, { id: assetId as never });
+	if (!asset) {
+		return { success: false, error: "Asset not found", status: 404 };
+	}
+
+	// Check if OCR is completed
+	const ocrCompletedStatuses = [
+		"ocr_completed",
+		"extraction_queued",
+		"extraction_processing",
+		"extraction_completed",
+		"extraction_failed",
+	];
+	if (!ocrCompletedStatuses.includes(asset.processingStatus)) {
+		return {
+			success: false,
+			error: `OCR not completed. Current status: ${asset.processingStatus}`,
+			status: 400,
+		};
+	}
+
+	// Load per-page OCR results
+	const pageResults = await getAllOcrResults(assetId);
+	if (pageResults.length === 0) {
+		return {
+			success: false,
+			error: "No OCR results found for asset",
+			status: 404,
+		};
+	}
+
+	// Convert to legacy format
+	const legacyPages = convertToLegacyOcrFormat(pageResults);
+	const totalWordCount = legacyPages.reduce((sum, p) => sum + p.wordCount, 0);
+	const avgConfidence =
+		legacyPages.reduce((sum, p) => sum + p.confidence, 0) / legacyPages.length;
+	const combinedText = legacyPages
+		.sort((a, b) => a.pageNumber - b.pageNumber)
+		.map((p) => p.text)
+		.join("\n\n---\n\n");
+
+	const results: OcrJobResults = {
+		jobId: assetId, // Use assetId as pseudo-jobId
+		sourceKey: asset.key,
+		totalPages: pageResults.length,
+		pages: legacyPages,
+		combinedText,
+		totalWordCount,
+		averageConfidence: avgConfidence,
+		processedAt: new Date().toISOString(),
+	};
+
+	return {
+		success: true,
+		results,
+		sourceKey: asset.key,
+		projectId: asset.projectId as string | undefined,
+	};
+}
+
+/**
+ * Loads OCR results from the legacy job format.
+ */
+async function loadLegacyOcrResults(ocrJobId: string): Promise<
+	| {
+			success: true;
+			results: OcrJobResults;
+			sourceKey: string;
+			projectId?: string;
+	  }
+	| { success: false; error: string; status: number; jobStatus?: string }
+> {
+	// Get the OCR job to verify it's completed
+	const ocrJob = await getJob(ocrJobId);
+	if (!ocrJob) {
+		return { success: false, error: "OCR job not found", status: 404 };
+	}
+
+	if (ocrJob.status !== "completed") {
+		return {
+			success: false,
+			error: "OCR job not completed",
+			status: 400,
+			jobStatus: ocrJob.status,
+		};
+	}
+
+	// Load OCR results
+	const ocrResultsKey = `processing/${ocrJobId}/ocr-results.json`;
+
+	try {
+		const { body: stream } = await downloadFromR2(ocrResultsKey);
+		const text = await streamToString(stream);
+		const results = JSON.parse(text) as OcrJobResults;
+
+		return {
+			success: true,
+			results,
+			sourceKey: ocrJob.sourceKey,
+			projectId: ocrJob.projectId,
+		};
+	} catch {
+		return { success: false, error: "Failed to load OCR results", status: 500 };
 	}
 }
 

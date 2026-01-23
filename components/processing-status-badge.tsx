@@ -32,6 +32,26 @@ const STATUS_CONFIG: Record<
 		color: "text-muted-foreground",
 		bgColor: "bg-muted",
 	},
+	conversion_queued: {
+		icon: Clock,
+		color: "text-amber-600",
+		bgColor: "bg-amber-50 dark:bg-amber-950",
+	},
+	conversion_processing: {
+		icon: Loader2,
+		color: "text-amber-600",
+		bgColor: "bg-amber-50 dark:bg-amber-950",
+	},
+	conversion_completed: {
+		icon: CheckCircle2,
+		color: "text-amber-600",
+		bgColor: "bg-amber-50 dark:bg-amber-950",
+	},
+	conversion_failed: {
+		icon: AlertCircle,
+		color: "text-destructive",
+		bgColor: "bg-destructive/10",
+	},
 	ocr_queued: {
 		icon: Clock,
 		color: "text-blue-600",

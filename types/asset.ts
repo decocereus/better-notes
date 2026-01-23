@@ -6,13 +6,19 @@ import type { Id } from "@/convex/_generated/dataModel";
 
 /**
  * Processing status states for assets.
- * Assets go through: pending → ocr_queued → ocr_processing → ocr_completed →
- * extraction_queued → extraction_processing → extraction_completed
+ * Assets go through:
+ *   pending → conversion_queued → conversion_processing → conversion_completed →
+ *   ocr_queued → ocr_processing → ocr_completed →
+ *   extraction_queued → extraction_processing → extraction_completed
  *
- * Can fail at any stage: ocr_failed, extraction_failed
+ * Can fail at any stage: conversion_failed, ocr_failed, extraction_failed
  */
 export type AssetProcessingStatus =
 	| "pending"
+	| "conversion_queued"
+	| "conversion_processing"
+	| "conversion_completed"
+	| "conversion_failed"
 	| "ocr_queued"
 	| "ocr_processing"
 	| "ocr_completed"
@@ -128,6 +134,8 @@ export interface AssetResponse {
  */
 export function isProcessing(status: AssetProcessingStatus): boolean {
 	return (
+		status === "conversion_queued" ||
+		status === "conversion_processing" ||
 		status === "ocr_queued" ||
 		status === "ocr_processing" ||
 		status === "extraction_queued" ||
@@ -139,7 +147,11 @@ export function isProcessing(status: AssetProcessingStatus): boolean {
  * Check if a status indicates a failure.
  */
 export function isFailed(status: AssetProcessingStatus): boolean {
-	return status === "ocr_failed" || status === "extraction_failed";
+	return (
+		status === "conversion_failed" ||
+		status === "ocr_failed" ||
+		status === "extraction_failed"
+	);
 }
 
 /**
@@ -155,6 +167,10 @@ export function isCompleted(status: AssetProcessingStatus): boolean {
 export function getStatusLabel(status: AssetProcessingStatus): string {
 	const labels: Record<AssetProcessingStatus, string> = {
 		pending: "Pending",
+		conversion_queued: "Conversion Queued",
+		conversion_processing: "Converting PDF",
+		conversion_completed: "Conversion Complete",
+		conversion_failed: "Conversion Failed",
 		ocr_queued: "OCR Queued",
 		ocr_processing: "OCR Processing",
 		ocr_completed: "OCR Complete",

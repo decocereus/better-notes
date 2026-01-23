@@ -3,6 +3,32 @@
  * @module lib/storage
  */
 
+// OCR results storage helpers
+export {
+	getAllOcrResults,
+	getCombinedOcrResults,
+	getOcrStatus,
+	getPageOcrResult,
+	isOcrComplete,
+	listOcrResults,
+	storeOcrStatus,
+	storePageOcrResult,
+	streamCombinedText,
+} from "./ocr-results";
+// Page images storage helpers
+export {
+	getAllPageImageUrls,
+	getAssetMetadata,
+	getConversionStatus,
+	getPageCount,
+	getPageImageKey,
+	getPageImageUrl,
+	isConversionComplete,
+	listPageImages,
+	storeAssetMetadata,
+	storeConversionStatus,
+	storePageImage,
+} from "./page-images";
 export {
 	deleteFromR2,
 	downloadFromR2,
@@ -15,14 +41,12 @@ export {
 	uploadToR2,
 	validateR2Config,
 } from "./r2-client";
-
 export type {
 	ReadUrlOptions,
 	ReadUrlResult,
 	UploadUrlOptions,
 	UploadUrlResult,
 } from "./signed-urls";
-
 export {
 	getBatchReadUrls,
 	getDownloadUrl,

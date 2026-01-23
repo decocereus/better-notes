@@ -1,9 +1,9 @@
 /**
- * OCR API Route
- * Starts and manages OCR processing jobs for PDF files.
+ * OCR API Route (Legacy + New Pipeline)
  *
- * Uses direct PDF-to-LLM approach - sends PDF URL directly to Gemini
- * instead of rendering pages with pdf.js.
+ * Supports two modes:
+ * 1. Direct PDF OCR (legacy) - For small PDFs (<50MB), sends directly to Gemini
+ * 2. Page-image pipeline (new) - For large PDFs, converts to images first
  *
  * POST: Start a new OCR job
  * GET: Get job status
@@ -19,8 +19,18 @@ import {
 	getJob,
 	updateJobProgress,
 } from "@/lib/processing";
-import { getReadUrl, uploadToR2, validateR2Config } from "@/lib/storage";
+import {
+	getR2FileInfo,
+	getReadUrl,
+	uploadToR2,
+	validateR2Config,
+} from "@/lib/storage";
 import type { OcrJobResults, StartOcrJobInput } from "@/types";
+
+/**
+ * Size threshold for using page-image pipeline (50MB).
+ */
+const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
 
 /**
  * Extended input that includes asset tracking.
@@ -28,6 +38,8 @@ import type { OcrJobResults, StartOcrJobInput } from "@/types";
 interface ExtendedOcrJobInput extends StartOcrJobInput {
 	assetId?: string;
 	autoExtract?: boolean;
+	/** Force use of page-image pipeline even for small files */
+	forcePagePipeline?: boolean;
 }
 
 /**
@@ -58,7 +70,8 @@ export async function POST(request: NextRequest) {
 
 		// Parse request
 		const body = (await request.json()) as ExtendedOcrJobInput;
-		const { sourceKey, projectId, assetId, autoExtract } = body;
+		const { sourceKey, projectId, assetId, autoExtract, forcePagePipeline } =
+			body;
 
 		if (!sourceKey) {
 			return NextResponse.json(
@@ -66,6 +79,39 @@ export async function POST(request: NextRequest) {
 				{ status: 400 }
 			);
 		}
+
+		// Check file size to determine which pipeline to use
+		const fileInfo = await getR2FileInfo(sourceKey);
+		const fileSize = fileInfo.size ?? 0;
+		const usePipeline = forcePagePipeline || fileSize > LARGE_FILE_THRESHOLD;
+
+		if (usePipeline) {
+			// Redirect to new pipeline for large files
+			console.log(
+				`[OCR] File size ${(fileSize / 1024 / 1024).toFixed(1)}MB exceeds threshold, using page-image pipeline`
+			);
+
+			// Forward to new pipeline
+			const pipelineResponse = await fetch(
+				new URL("/api/ocr/start", request.url).toString(),
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ assetId, sourceKey, autoExtract }),
+				}
+			);
+
+			const pipelineResult = await pipelineResponse.json();
+
+			return NextResponse.json(pipelineResult, {
+				status: pipelineResponse.status,
+			});
+		}
+
+		// Use legacy direct PDF OCR for small files
+		console.log(
+			`[OCR] File size ${(fileSize / 1024 / 1024).toFixed(1)}MB, using direct PDF OCR`
+		);
 
 		// Get signed URL for the PDF
 		const urlResult = await getReadUrl({
@@ -170,8 +216,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Background function to process OCR job.
- * Sends the entire PDF to the LLM for OCR processing.
+ * Background function to process OCR job (legacy direct approach).
  */
 async function processOcrJob(
 	jobId: string,

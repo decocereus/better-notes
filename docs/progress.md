@@ -4,9 +4,98 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
-**Sprint 14 Complete** ✅ - Global Asset Library & Automated Processing Pipeline
+**OCR Pipeline Redesign Complete** ✅ - PDF-to-Images with Multi-Model Fallback
 **Build Status:** ✅ Passing (all issues resolved)
-**Tests:** ✅ 137+ passing
+**Tests:** ✅ 159 passing
+
+---
+
+## OCR Pipeline Redesign (2026-01-23) - Complete
+
+**Problem:** Large PDFs (500MB+, 1300+ pages) fail to process because Google's PDF limit is 50MB and OpenRouter has a 5MB file size limit.
+
+**Solution:** Convert PDF to page images first, then OCR each image independently with multi-model fallback (Gemini Flash primary → Claude Sonnet for retries).
+
+### Architecture
+
+```
+PDF Upload → CloudConvert (PDF-to-images) → R2 Storage
+    → Gemini Flash (parallel OCR, 10 pages at a time)
+    → Quality Check (confidence, word count, illegible ratio)
+    → Claude Sonnet retry (low-quality pages)
+    → Extraction Pipeline
+```
+
+### Files Created
+
+**Types:**
+- `types/ocr.ts` - PageOcrResult, ConversionStatus, OcrStatus, RetryThresholds, AssetOcrResults, OcrPipelineProgress
+
+**Storage Helpers:**
+- `lib/storage/page-images.ts` - List/read page images from R2
+- `lib/storage/ocr-results.ts` - Read/write per-page JSON results
+
+**OCR Service:**
+- `lib/ai/models.ts` - Model selection (Gemini Flash, Claude Sonnet)
+- `lib/ai/retry-logic.ts` - Quality thresholds, retry decision logic
+- `lib/ai/ocr.ts` - Complete rewrite for page-image OCR
+
+**PDF Conversion:**
+- `lib/services/pdf-conversion.ts` - CloudConvert API client
+
+**API Routes:**
+- `app/api/ocr/start/route.ts` - Trigger full pipeline (conversion + OCR)
+- `app/api/ocr/status/route.ts` - Progress polling endpoint
+- `app/api/ocr/retry/route.ts` - Manual retry endpoint
+- `app/api/ocr/results/route.ts` - Fetch results (single page or combined)
+
+**Tests:**
+- `lib/ai/__tests__/retry-logic.test.ts` - 22 tests for retry logic
+
+### Files Modified
+
+- `types/asset.ts` - Added conversion_* status values
+- `convex/schema.ts` - Added conversion status values to schema
+- `convex/assets.ts` - Added conversion status values to validator
+- `lib/env.ts` - Added ANTHROPIC_API_KEY, CLOUDCONVERT_API_KEY
+- `app/api/ocr/route.ts` - Updated to support both legacy and new pipeline
+- `app/api/extract/route.ts` - Updated to read from per-page OCR format
+- `components/processing-status-badge.tsx` - Added conversion status UI
+
+### R2 Storage Structure
+
+```
+assets/{assetId}/
+  metadata.json                    # Page count, dimensions
+  conversion-status.json           # { status, pagesProcessed, totalPages }
+  ocr-status.json                  # { status, pagesProcessed, retriedCount }
+  pages/
+    page-0001.jpg                  # Converted images
+    page-0002.jpg
+    ...
+  ocr/
+    page-0001.json                 # Per-page OCR results
+    page-0002.json
+    ...
+```
+
+### Retry Thresholds
+
+```typescript
+const DEFAULT_RETRY_THRESHOLDS = {
+  minWordCount: 30,        // Retry if < 30 words
+  maxIllegibleRatio: 0.15, // Retry if > 15% illegible
+  minConfidence: 0.7,      // Retry if confidence < 70%
+};
+```
+
+### Environment Variables Required
+
+```env
+CLOUDCONVERT_API_KEY=xxx      # For PDF-to-image conversion
+ANTHROPIC_API_KEY=xxx         # For Claude Sonnet fallback
+GOOGLE_GENERATIVE_AI_API_KEY=xxx  # For Gemini Flash primary
+```
 
 ---
 

@@ -6,6 +6,10 @@ import { mutation, query } from "./_generated/server";
  */
 const processingStatusValidator = v.union(
 	v.literal("pending"),
+	v.literal("conversion_queued"),
+	v.literal("conversion_processing"),
+	v.literal("conversion_completed"),
+	v.literal("conversion_failed"),
 	v.literal("ocr_queued"),
 	v.literal("ocr_processing"),
 	v.literal("ocr_completed"),
@@ -121,6 +125,10 @@ export const getStats = query({
 			unassigned: 0,
 			byStatus: {
 				pending: 0,
+				conversion_queued: 0,
+				conversion_processing: 0,
+				conversion_completed: 0,
+				conversion_failed: 0,
 				ocr_queued: 0,
 				ocr_processing: 0,
 				ocr_completed: 0,

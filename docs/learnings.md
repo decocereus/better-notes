@@ -19,6 +19,34 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-23 - CloudConvert API for PDF-to-Image Conversion
+
+**Context:** Implementing PDF-to-image conversion for large PDFs (500MB+, 1300+ pages)
+**Problem:** LLM APIs have file size limits (Gemini 50MB, OpenRouter 5MB), making direct PDF OCR impossible for large files
+**Solution:** Use CloudConvert API to convert PDF pages to JPEG images, then OCR each image independently
+**Lesson:** For large file processing, split the work into manageable chunks. CloudConvert handles PDFs up to 10GB and outputs individual page images that fit within LLM limits.
+
+### 2026-01-23 - Multi-Model OCR Fallback Strategy
+
+**Context:** OCR results from Gemini Flash sometimes have low quality (low confidence, missing text, high illegible markers)
+**Problem:** Single-model OCR doesn't handle all handwriting styles equally well
+**Solution:** Primary OCR with Gemini Flash (fast, cheap), then retry low-quality pages with Claude Sonnet (slower, more accurate). Quality thresholds: wordCount < 30, confidence < 0.7, illegible > 15%
+**Lesson:** Use a cheaper model for bulk processing, then fall back to a more capable model for edge cases. This balances cost and quality.
+
+### 2026-01-23 - Per-Page OCR Results Storage
+
+**Context:** Storing OCR results for 1300+ page PDFs
+**Problem:** Storing all results in a single JSON file is unwieldy and makes incremental processing difficult
+**Solution:** Store each page's OCR result as a separate JSON file: `assets/{assetId}/ocr/page-0001.json`. Combine them on-demand for the extraction pipeline.
+**Lesson:** For large-scale processing, store results incrementally. This enables progress tracking, resumption after failures, and selective retries.
+
+### 2026-01-23 - Extraction Pipeline Integration with New OCR Format
+
+**Context:** The extraction pipeline expected OCR results from the legacy job format (`processing/{jobId}/ocr-results.json`)
+**Problem:** New OCR pipeline stores results per-page in a different format (`PageOcrResult` vs `OcrPageResult`)
+**Solution:** Add format detection and conversion layer - when `assetId` is provided, load per-page results and convert to legacy format. Keep backward compatibility for `ocrJobId`.
+**Lesson:** When redesigning a pipeline component, maintain backward compatibility by supporting both old and new formats. Use a conversion layer to bridge the gap.
+
 ### 2026-01-23 - Convex Id<> Type Casting in API Routes
 
 **Context:** API routes receive string IDs from request params but Convex mutations expect `Id<"tableName">` types

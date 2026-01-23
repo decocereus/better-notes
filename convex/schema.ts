@@ -69,6 +69,10 @@ export default defineSchema({
 		projectId: v.optional(v.id("projects")),
 		processingStatus: v.union(
 			v.literal("pending"),
+			v.literal("conversion_queued"),
+			v.literal("conversion_processing"),
+			v.literal("conversion_completed"),
+			v.literal("conversion_failed"),
 			v.literal("ocr_queued"),
 			v.literal("ocr_processing"),
 			v.literal("ocr_completed"),

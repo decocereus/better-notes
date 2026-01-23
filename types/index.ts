@@ -61,6 +61,18 @@ export type {
 	SyncStatus,
 } from "./generation";
 export { DEFAULT_GENERATION_CONFIG } from "./generation";
+// OCR pipeline types
+export type {
+	AssetMetadata,
+	AssetOcrResults,
+	ConversionStatus,
+	OcrPipelineProgress,
+	OcrStatus,
+	PageOcrResult as NewPageOcrResult,
+	RetryThresholds,
+	StartOcrPipelineInput,
+} from "./ocr";
+export { DEFAULT_RETRY_THRESHOLDS } from "./ocr";
 // Processing types
 export type {
 	OcrJobResults,

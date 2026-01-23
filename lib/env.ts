@@ -8,6 +8,10 @@ export const env = {
 	OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
 	// Google AI for direct Gemini access (bypasses OpenRouter's 5MB file limit)
 	GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
+	// Anthropic API for Claude fallback OCR
+	ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
+	// CloudConvert API for PDF-to-image conversion
+	CLOUDCONVERT_API_KEY: process.env.CLOUDCONVERT_API_KEY ?? "",
 	// Cloudflare R2 Storage
 	R2_ENDPOINT: process.env.R2_ENDPOINT ?? "",
 	R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "",
