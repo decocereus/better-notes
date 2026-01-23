@@ -28,6 +28,14 @@ import { getReadUrl, uploadToR2, validateR2Config } from "@/lib/storage";
 import type { OcrJobResults, OcrPageResult, StartOcrJobInput } from "@/types";
 
 /**
+ * Extended input that includes asset tracking.
+ */
+interface ExtendedOcrJobInput extends StartOcrJobInput {
+	assetId?: string;
+	autoExtract?: boolean;
+}
+
+/**
  * POST /api/ocr
  * Starts a new OCR processing job.
  */
@@ -54,8 +62,9 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Parse request
-		const body = (await request.json()) as StartOcrJobInput;
-		const { sourceKey, projectId, startPage, endPage } = body;
+		const body = (await request.json()) as ExtendedOcrJobInput;
+		const { sourceKey, projectId, startPage, endPage, assetId, autoExtract } =
+			body;
 
 		if (!sourceKey) {
 			return NextResponse.json(
@@ -80,15 +89,19 @@ export async function POST(request: NextRequest) {
 		const job = await createJob("ocr", sourceKey, projectId, totalPages);
 
 		// Start processing in the background
-		processOcrJob(job.id, pdfResult, firstPage, lastPage, plan.approach).catch(
-			(error) => {
-				console.error(`OCR job ${job.id} failed:`, error);
-				failJob(
-					job.id,
-					error instanceof Error ? error.message : "Unknown error"
-				);
-			}
-		);
+		processOcrJob(
+			job.id,
+			pdfResult,
+			firstPage,
+			lastPage,
+			plan.approach,
+			assetId,
+			autoExtract,
+			request.url
+		).catch((error) => {
+			console.error(`OCR job ${job.id} failed:`, error);
+			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
+		});
 
 		// Clean up - destroy document after starting background processing
 		await document.destroy();
@@ -181,12 +194,16 @@ export async function GET(request: NextRequest) {
  * Background function to process OCR job.
  * This runs asynchronously after the initial response.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Background job processing requires handling many cases
 async function processOcrJob(
 	jobId: string,
 	pdfResult: Awaited<ReturnType<typeof loadPdfFromR2>>,
 	startPage: number,
 	endPage: number,
-	_approach: "ocr_all" | "ocr_partial" | "text_only"
+	_approach: "ocr_all" | "ocr_partial" | "text_only",
+	assetId?: string,
+	autoExtract?: boolean,
+	requestUrl?: string
 ) {
 	const totalPages = endPage - startPage + 1;
 	const batchSize = calculateOptimalBatchSize(totalPages);
@@ -255,6 +272,55 @@ async function processOcrJob(
 			Buffer.from(JSON.stringify(fullResults, null, 2)),
 			"application/json"
 		);
+
+		// Update asset status if assetId provided
+		if (assetId) {
+			try {
+				const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+				if (convexUrl) {
+					const { ConvexHttpClient } = await import("convex/browser");
+					const { api } = await import("@/convex/_generated/api");
+					const convex = new ConvexHttpClient(convexUrl);
+
+					// assetId is string from request, Convex validates at runtime
+					await convex.mutation(api.assets.updateStatus, {
+						id: assetId as never,
+						status: "ocr_completed",
+						ocrWordCount: fullResults.totalWordCount,
+					});
+
+					console.log(`Updated asset ${assetId} status to ocr_completed`);
+
+					// Trigger extraction if autoExtract is enabled
+					if (autoExtract && requestUrl) {
+						const baseUrl = new URL(requestUrl).origin;
+						fetch(`${baseUrl}/api/extract`, {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({
+								ocrJobId: jobId,
+								assetId,
+							}),
+						}).catch((err) => {
+							console.error(
+								`Failed to trigger auto-extraction for asset ${assetId}:`,
+								err
+							);
+						});
+
+						// Update asset status to extraction_queued
+						await convex.mutation(api.assets.updateStatus, {
+							id: assetId as never,
+							status: "extraction_queued",
+						});
+
+						console.log(`Auto-extraction triggered for asset ${assetId}`);
+					}
+				}
+			} catch (err) {
+				console.error(`Failed to update asset ${assetId}:`, err);
+			}
+		}
 	}
 
 	await completeJob(jobId);

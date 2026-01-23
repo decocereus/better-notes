@@ -19,6 +19,41 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-23 - Convex Id<> Type Casting in API Routes
+
+**Context:** API routes receive string IDs from request params but Convex mutations expect `Id<"tableName">` types
+**Problem:** TypeScript error when passing `assetId` (string) to Convex mutation expecting `Id<"assets">`
+**Solution:** Use `as never` cast pattern: `id: assetId as never` - this satisfies TypeScript without creating runtime issues since Convex validates the ID format
+**Lesson:** When passing string IDs to Convex from API routes, use `as never` cast. The Convex runtime will validate the ID is properly formatted.
+
+### 2026-01-23 - Implicit Any with Mutable Variables in Convex Functions
+
+**Context:** Convex function with `let assets;` followed by conditional query assignments
+**Problem:** Biome flagged "Unexpected any" because TypeScript inferred `any` type for the variable
+**Solution:** Refactor to use early returns instead of mutable variable - each branch returns directly from the query
+**Lesson:** Avoid mutable variables in Convex query handlers. Use early returns for each conditional branch to maintain type safety.
+
+### 2026-01-23 - Array.at() Method for Safe Index Access
+
+**Context:** Migration script accessing last element of array with `parts[parts.length - 1]`
+**Problem:** Biome flagged unsafe array access (could be undefined)
+**Solution:** Use `parts.at(-1) ?? ""` - the `at()` method safely handles negative indices and returns undefined
+**Lesson:** Use `array.at(-1)` instead of `array[array.length - 1]` for cleaner, safer access to last element
+
+### 2026-01-23 - Top-Level Regex Constants in Scripts
+
+**Context:** Migration script had regex pattern `/^\d+-/` inside the function
+**Problem:** Biome's `useTopLevelRegex` rule flagged regex inside function
+**Solution:** Move to module-level constant: `const TIMESTAMP_PREFIX_REGEX = /^\d+-/;`
+**Lesson:** Even in one-off scripts, follow the same performance patterns as application code - top-level regex constants
+
+### 2026-01-23 - Processing Status State Machine Design
+
+**Context:** Designing asset processing status for OCR → extraction pipeline
+**Problem:** Needed to track granular status for both OCR and extraction phases
+**Solution:** Use explicit state machine with 9 states covering pending, queued, processing, completed, and failed for each phase
+**Lesson:** For multi-step pipelines, design explicit status values for each phase transition. This makes debugging easier and allows UI to show precise progress.
+
 ### 2026-01-23 - File vs Directory Module Conflict
 
 **Context:** Created lib/storage/ directory with index.ts for R2 module

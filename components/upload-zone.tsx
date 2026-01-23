@@ -19,6 +19,8 @@ interface UploadZoneProps {
 	onUploadError?: (error: string) => void;
 	disabled?: boolean;
 	multiple?: boolean;
+	/** Whether to automatically process PDFs (OCR + extraction) after upload */
+	autoProcess?: boolean;
 }
 
 interface FileWithPreview {
@@ -78,13 +80,15 @@ function getFileItemClassName(status: FileWithPreview["status"]): string {
 
 /**
  * Uploads a file directly to R2 using a signed URL.
+ * Also creates an asset record in Convex.
  * Returns a promise with progress updates via callback.
  */
 async function uploadToR2(
 	file: File,
 	projectId: string,
-	onProgress: (progress: number) => void
-): Promise<UploadResponse> {
+	onProgress: (progress: number) => void,
+	autoProcess = false
+): Promise<UploadResponse & { assetId?: string }> {
 	// Step 1: Get signed upload URL
 	const urlResponse = await fetch("/api/storage/upload-url", {
 		method: "POST",
@@ -132,6 +136,31 @@ async function uploadToR2(
 		xhr.send(file);
 	});
 
+	// Create asset record in Convex
+	let assetId: string | undefined;
+	try {
+		const assetResponse = await fetch("/api/assets", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				key,
+				filename: file.name,
+				size: file.size,
+				mimeType: file.type,
+				projectId: projectId === "unassigned" ? undefined : projectId,
+				autoProcess: autoProcess && file.type === "application/pdf",
+			}),
+		});
+
+		if (assetResponse.ok) {
+			const assetData = await assetResponse.json();
+			assetId = assetData.assetId;
+		}
+	} catch (err) {
+		// Asset creation failed but upload succeeded, continue
+		console.error("Failed to create asset record:", err);
+	}
+
 	// Return the response in the expected format
 	return {
 		key,
@@ -141,6 +170,7 @@ async function uploadToR2(
 		sizeFormatted: formatFileSize(file.size),
 		type: file.type,
 		sourceType: file.type === "application/pdf" ? "pdf" : "image",
+		assetId,
 	};
 }
 
@@ -150,6 +180,7 @@ export function UploadZone({
 	onUploadError,
 	disabled = false,
 	multiple = false,
+	autoProcess = false,
 }: UploadZoneProps) {
 	const [isDragging, setIsDragging] = useState(false);
 	const [files, setFiles] = useState<FileWithPreview[]>([]);
@@ -174,8 +205,11 @@ export function UploadZone({
 				// Use "unassigned" if no projectId provided
 				const resolvedProjectId = projectId ?? "unassigned";
 
-				const data = await uploadToR2(file, resolvedProjectId, (progress) =>
-					updateFileProgress(index, progress)
+				const data = await uploadToR2(
+					file,
+					resolvedProjectId,
+					(progress) => updateFileProgress(index, progress),
+					autoProcess
 				);
 
 				setFiles((prev) =>
@@ -200,7 +234,13 @@ export function UploadZone({
 				onUploadError?.(errorMessage);
 			}
 		},
-		[projectId, onUploadComplete, onUploadError, updateFileProgress]
+		[
+			projectId,
+			onUploadComplete,
+			onUploadError,
+			updateFileProgress,
+			autoProcess,
+		]
 	);
 
 	const processFiles = useCallback(

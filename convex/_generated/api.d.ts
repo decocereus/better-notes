@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as assets from "../assets.js";
+import type * as extractionResults from "../extractionResults.js";
 import type * as projects from "../projects.js";
 import type * as settings from "../settings.js";
 import type * as themePages from "../themePages.js";
@@ -19,6 +21,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  assets: typeof assets;
+  extractionResults: typeof extractionResults;
   projects: typeof projects;
   settings: typeof settings;
   themePages: typeof themePages;

@@ -80,8 +80,9 @@ export async function POST(request: NextRequest) {
 		// Parse request
 		const body = (await request.json()) as StartExtractionJobInput & {
 			parameters?: ExtractionParameters;
+			assetId?: string;
 		};
-		const { ocrJobId, parameters } = body;
+		const { ocrJobId, parameters, assetId } = body;
 
 		if (!ocrJobId) {
 			return NextResponse.json(
@@ -137,16 +138,34 @@ export async function POST(request: NextRequest) {
 			1 // Initial estimate, will update
 		);
 
-		// Start processing in the background
-		processExtractionJob(job.id, ocrJobId, ocrResults, extractionParams).catch(
-			(error) => {
-				console.error(`Extraction job ${job.id} failed:`, error);
-				failJob(
-					job.id,
-					error instanceof Error ? error.message : "Unknown error"
-				);
+		// Update asset status if provided
+		if (assetId) {
+			const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+			if (convexUrl) {
+				const { ConvexHttpClient } = await import("convex/browser");
+				const { api } = await import("@/convex/_generated/api");
+				const convex = new ConvexHttpClient(convexUrl);
+
+				// assetId is a string from the request, Convex validates at runtime
+				await convex.mutation(api.assets.updateStatus, {
+					id: assetId as never,
+					status: "extraction_processing",
+					extractionJobId: job.id,
+				});
 			}
-		);
+		}
+
+		// Start processing in the background
+		processExtractionJob(
+			job.id,
+			ocrJobId,
+			ocrResults,
+			extractionParams,
+			assetId
+		).catch((error) => {
+			console.error(`Extraction job ${job.id} failed:`, error);
+			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
+		});
 
 		return NextResponse.json(
 			{
@@ -247,7 +266,8 @@ async function processExtractionJob(
 	jobId: string,
 	ocrJobId: string,
 	ocrResults: OcrJobResults,
-	parameters: ExtractionParameters
+	parameters: ExtractionParameters,
+	assetId?: string
 ) {
 	// Step 1: Detect essay boundaries
 	const boundaries = await detectEssayBoundaries(ocrResults.pages);
@@ -313,6 +333,42 @@ async function processExtractionJob(
 	);
 
 	await completeJob(jobId);
+
+	// Update asset status and save extraction results if assetId provided
+	if (assetId) {
+		try {
+			const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+			if (convexUrl) {
+				const { ConvexHttpClient } = await import("convex/browser");
+				const { api } = await import("@/convex/_generated/api");
+				const convex = new ConvexHttpClient(convexUrl);
+
+				// Update asset status (assetId is string from request, Convex validates at runtime)
+				await convex.mutation(api.assets.updateStatus, {
+					id: assetId as never,
+					status: "extraction_completed",
+					extractedItemCount: allItems.length,
+				});
+
+				// Create extraction results record
+				await convex.mutation(api.extractionResults.create, {
+					assetId: assetId as never,
+					ocrJobId,
+					extractionJobId: jobId,
+					totalEssays: extractionResults.length,
+					totalItems: allItems.length,
+					stats,
+					resultsKey,
+				});
+
+				console.log(
+					`Asset ${assetId} extraction completed: ${allItems.length} items`
+				);
+			}
+		} catch (err) {
+			console.error(`Failed to update asset ${assetId}:`, err);
+		}
+	}
 }
 
 /**

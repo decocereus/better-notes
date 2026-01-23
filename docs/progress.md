@@ -4,9 +4,108 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
-**Sprint 13 Complete** ✅ - Multi-Theme Pages Feature
+**Sprint 14 Complete** ✅ - Global Asset Library & Automated Processing Pipeline
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 137+ passing
+
+---
+
+## Sprint 14 - Global Asset Library & Automated Processing Pipeline (2026-01-23) - Complete
+
+### Overview
+
+Built a global asset library that tracks ALL uploads in Convex with an automated processing pipeline: **Upload → OCR → Pattern Extraction → Persistent Storage**.
+
+**Problems Solved:**
+1. Unassigned files no longer lost - Files uploaded without a project now have database records
+2. Global view available - Can see all uploaded files across the system at `/assets`
+3. Automated pipeline - OCR and extraction triggered automatically after upload
+4. Persistent patterns - Extracted patterns stored in Convex, not localStorage
+
+### Files Created
+
+**Types:**
+- `types/asset.ts` - AssetProcessingStatus, Asset, AssetStats, ExtractionResultMetadata types with helper functions
+
+**Convex Schema & Functions:**
+- `convex/schema.ts` - Added `assets` and `extractionResults` tables with indexes
+- `convex/assets.ts` - CRUD operations: list, get, getByKey, getStats, create, assignToProject, updateStatus, remove, listByProject
+- `convex/extractionResults.ts` - create, getByAsset, list, removeByAsset functions
+
+**API Routes:**
+- `app/api/assets/route.ts` - GET (list with filters), POST (create after upload with autoProcess)
+- `app/api/assets/[id]/route.ts` - GET (with preview URL), PATCH (assign to project), DELETE (remove from Convex + R2)
+- `app/api/assets/[id]/process/route.ts` - POST (trigger OCR → extraction pipeline)
+
+**UI Components:**
+- `components/processing-status-badge.tsx` - Status indicator with colors/icons per status
+- `components/asset-card.tsx` - Asset display card with actions dropdown
+- `components/assign-asset-dialog.tsx` - Project assignment dialog
+- `components/asset-detail-dialog.tsx` - Asset details view with preview and extraction results
+- `components/assets-content.tsx` - Main content with stats cards, filters, asset grid
+- `app/assets/page.tsx` - Assets page (Server Component)
+
+**Migration:**
+- `scripts/migrate-unassigned-files.ts` - Creates asset records for existing R2 files
+
+### Files Modified
+
+- `app/api/ocr/route.ts` - Added `assetId` and `autoExtract` params, updates asset status after OCR
+- `app/api/extract/route.ts` - Added `assetId` param, updates asset status and creates extractionResults record
+- `components/upload-zone.tsx` - Added `autoProcess` prop, creates asset record after R2 upload
+- `components/layout/sidebar.tsx` - Added Assets nav item with FolderOpen icon
+
+### Processing Pipeline Flow
+
+```
+User uploads file → UploadZone → R2 (signed URL)
+       ↓
+POST /api/assets (create record, autoProcess=true)
+       ↓
+POST /api/assets/[id]/process
+       ↓
+POST /api/ocr (with assetId, autoExtract=true)
+       ↓
+[Background] OCR processing
+       ↓
+Update asset: status=ocr_completed, ocrWordCount
+       ↓
+[Auto] POST /api/extract (with assetId, ocrJobId)
+       ↓
+[Background] Extraction processing
+       ↓
+Update asset: status=extraction_completed, extractedItemCount
+       ↓
+Create extractionResults record in Convex
+       ↓
+Available in /assets UI and /patterns page
+```
+
+### Asset Processing States
+
+```typescript
+type AssetProcessingStatus =
+  | "pending"
+  | "ocr_queued"
+  | "ocr_processing"
+  | "ocr_completed"
+  | "ocr_failed"
+  | "extraction_queued"
+  | "extraction_processing"
+  | "extraction_completed"
+  | "extraction_failed";
+```
+
+### Key Features
+
+- Automatic pipeline: Upload PDF → OCR starts automatically → Extraction starts after OCR completes
+- Asset library UI with stats cards (total, unassigned, processing, completed)
+- Filters by status and assignment
+- Search by filename
+- Assign/unassign assets to projects
+- View asset details with preview and extraction results
+- Delete assets (removes from both Convex and R2)
+- Migration script for existing R2 files
 
 ---
 

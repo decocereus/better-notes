@@ -4,6 +4,7 @@ import {
 	BookOpen,
 	FileText,
 	FolderKanban,
+	FolderOpen,
 	Home,
 	Menu,
 	Settings,
@@ -19,6 +20,7 @@ import { Button } from "../ui/button";
 const NAV_ITEMS = [
 	{ href: "/", label: "Dashboard", icon: Home },
 	{ href: "/projects", label: "Projects", icon: FolderKanban },
+	{ href: "/assets", label: "Assets", icon: FolderOpen },
 	{ href: "/themes", label: "Themes", icon: BookOpen },
 	{ href: "/patterns", label: "Patterns", icon: FileText },
 	{ href: "/upload", label: "Upload", icon: Upload },
