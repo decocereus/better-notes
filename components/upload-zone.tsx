@@ -3,7 +3,6 @@
 import { FileIcon, Loader2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useState } from "react";
-import type { UploadResponse } from "@/app/api/upload/route";
 import { Button } from "@/components/ui/button";
 import {
 	ALLOWED_FILE_TYPES_DISPLAY,
@@ -12,9 +11,7 @@ import {
 	MAX_FILE_SIZE_BYTES,
 	MAX_FILE_SIZE_DISPLAY,
 } from "@/lib/constants/upload";
-
-/** Threshold for using direct R2 upload (10MB) */
-const DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024;
+import type { UploadResponse } from "@/types/upload";
 
 interface UploadZoneProps {
 	projectId?: string;
@@ -83,7 +80,7 @@ function getFileItemClassName(status: FileWithPreview["status"]): string {
  * Uploads a file directly to R2 using a signed URL.
  * Returns a promise with progress updates via callback.
  */
-async function uploadDirectToR2(
+async function uploadToR2(
 	file: File,
 	projectId: string,
 	onProgress: (progress: number) => void
@@ -147,32 +144,6 @@ async function uploadDirectToR2(
 	};
 }
 
-/**
- * Uploads a file through the server (for smaller files).
- */
-async function uploadThroughServer(
-	file: File,
-	projectId: string | undefined
-): Promise<UploadResponse> {
-	const formData = new FormData();
-	formData.append("file", file);
-	if (projectId) {
-		formData.append("projectId", projectId);
-	}
-
-	const response = await fetch("/api/upload", {
-		method: "POST",
-		body: formData,
-	});
-
-	if (!response.ok) {
-		const errorData = await response.json();
-		throw new Error(errorData.error || "Upload failed");
-	}
-
-	return response.json();
-}
-
 export function UploadZone({
 	projectId,
 	onUploadComplete,
@@ -200,17 +171,12 @@ export function UploadZone({
 			);
 
 			try {
-				let data: UploadResponse;
+				// Use "unassigned" if no projectId provided
+				const resolvedProjectId = projectId ?? "unassigned";
 
-				// Use direct R2 upload for large files
-				if (file.size > DIRECT_UPLOAD_THRESHOLD && projectId) {
-					data = await uploadDirectToR2(file, projectId, (progress) =>
-						updateFileProgress(index, progress)
-					);
-				} else {
-					// Use server upload for smaller files
-					data = await uploadThroughServer(file, projectId);
-				}
+				const data = await uploadToR2(file, resolvedProjectId, (progress) =>
+					updateFileProgress(index, progress)
+				);
 
 				setFiles((prev) =>
 					prev.map((f, i) =>
@@ -381,7 +347,6 @@ interface FileItemProps {
 function FileItem({ fileWithPreview, onRemove }: FileItemProps) {
 	const { file, preview, status, progress, error, response } = fileWithPreview;
 	const isImage = file.type.startsWith("image/");
-	const isLargeFile = file.size > DIRECT_UPLOAD_THRESHOLD;
 
 	return (
 		<div className={getFileItemClassName(status)}>
@@ -405,15 +370,14 @@ function FileItem({ fileWithPreview, onRemove }: FileItemProps) {
 				<p className="text-muted-foreground text-xs">
 					{formatFileSize(file.size)}
 					{status === "completed" && response && " • Uploaded"}
-					{status === "uploading" && isLargeFile && progress !== undefined && (
+					{status === "uploading" && progress !== undefined && (
 						<> • {progress}%</>
 					)}
-					{status === "uploading" && !isLargeFile && " • Uploading..."}
 				</p>
 				{error && <p className="text-destructive text-xs">{error}</p>}
 
-				{/* Progress bar for large file uploads */}
-				{status === "uploading" && isLargeFile && progress !== undefined && (
+				{/* Progress bar for uploads */}
+				{status === "uploading" && progress !== undefined && (
 					<div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
 						<div
 							className="h-full bg-primary transition-all duration-300"

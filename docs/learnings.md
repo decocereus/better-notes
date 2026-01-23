@@ -495,3 +495,72 @@ async function getPdfjs() {
 **Problem:** Can't use `useMutation` hook in server-side code (API routes)
 **Solution:** Use `ConvexHttpClient` with direct mutation calls: `const convex = new ConvexHttpClient(url); await convex.mutation(api.projects.updateSource, { ... })`
 **Lesson:** Convex provides `ConvexHttpClient` for server-side operations - same API surface as client hooks but works without React
+
+### 2026-01-23 - Convex Filename Naming Requirements
+
+**Context:** Created `convex/theme-pages.ts` for theme pages CRUD operations
+**Problem:** Convex deployment failed with "theme-pages.js is not a valid path to a Convex module. Path component theme-pages.js can only contain alphanumeric characters, underscores, or periods."
+**Solution:** Rename to `themePages.ts` (camelCase) instead of kebab-case
+**Lesson:** Convex requires camelCase or snake_case filenames for module files - kebab-case is not allowed. Add biome.jsonc override for convex/ directory to use camelCase instead of project-wide kebab-case rule
+
+### 2026-01-23 - Removing Global Settings Impacts Many Components
+
+**Context:** Removing `themePageId`, `themePageTitle`, `isNotionConnected` from global AppSettings
+**Problem:** Many components referenced these settings - had to update dashboard-stats, dashboard-content, themes-content, compare components, classification-workflow, etc.
+**Solution:** Check Notion connection via API call (`/api/notion/connect`), fetch theme pages from Convex, pass themePageId as prop where needed
+**Lesson:** When migrating from global state to per-entity state, trace all usages first. Components that aggregate global data (like DashboardStats) need to query all entities and aggregate themselves.
+
+### 2026-01-23 - Testing React Components with Multiple useQuery Calls
+
+**Context:** Testing DashboardContent which contains SetupWizard, DashboardStats, RecentProjects - all using `useQuery`
+**Problem:** Using `mockReturnValueOnce` for multiple `useQuery` calls failed because React re-renders exhaust the mocks
+**Solution:** Use `mockReturnValue` with data that satisfies all components (e.g., objects with both theme page and project properties)
+**Lesson:** When testing components with multiple Convex queries, mock `useQuery` with a single return value that works for all calls, or use `mockImplementation` to inspect the query being called
+
+### 2026-01-23 - waitFor with Negation Can Pass Too Early
+
+**Context:** Test "hides setup wizard when basic setup is complete" using `waitFor(() => expect(element).not.toBeInTheDocument())`
+**Problem:** Test passed immediately during loading state (when element wasn't rendered yet), before the async fetch completed
+**Solution:** Wait for a positive condition first (e.g., "Overview" text appears), then check the negative condition
+**Lesson:** `waitFor` with `.not.toBeInTheDocument()` can pass during loading states. Chain positive assertions before negative ones to ensure the component fully loaded
+
+### 2026-01-23 - Required Props vs Optional Settings
+
+**Context:** `ClassificationWorkflow` was getting `themePageId` from global settings (optional)
+**Problem:** After removing from settings, component needed themePageId from somewhere else
+**Solution:** Make `themePageId` a required prop, remove the `hasThemePage` check since it's always defined when the component is used
+**Lesson:** When migrating from optional global state to explicit props, make the prop required - the caller is responsible for having the value. This simplifies the component's internal logic
+
+### 2026-01-23 - Controlled vs Uncontrolled Dialog Pattern
+
+**Context:** AddThemePageDialog needed to work both standalone (trigger-based) and inline (controlled from parent)
+**Problem:** Using only DialogTrigger meant parent couldn't programmatically open the dialog
+**Solution:** Support both modes: check if `open` prop is provided to use controlled mode, otherwise use internal state
+```typescript
+const [internalOpen, setInternalOpen] = useState(false);
+const isControlled = open !== undefined;
+const isOpen = isControlled ? open : internalOpen;
+const setIsOpen = isControlled ? onOpenChange! : setInternalOpen;
+```
+**Lesson:** For reusable dialogs, support both trigger-based (uncontrolled) and `open`/`onOpenChange` (controlled) patterns - allows flexible usage in different contexts
+
+### 2026-01-23 - Missing UI Component Dependencies
+
+**Context:** Using `Alert` component from `@/components/ui/alert` that didn't exist yet
+**Problem:** TypeScript error "Cannot find module '@/components/ui/alert'"
+**Solution:** Created the alert component using the standard shadcn/ui pattern with cva for variants
+**Lesson:** When shadcn/ui components aren't installed, check the shadcn website for the component source and create it manually - same pattern: cva for variants, forwardRef for ref forwarding
+
+### 2026-01-23 - Type Interface Consistency Across Files
+
+**Context:** Added `themePageId` to Convex schema and project mutations but not to TypeScript types
+**Problem:** TypeScript error "'themePageId' does not exist on type 'Project'"
+**Solution:** Updated `types/project.ts` to add `themePageId?: string` to the Project interface
+**Lesson:** When adding fields to Convex schema, also update corresponding TypeScript type interfaces - the types file is the source of truth for component type checking
+
+### 2026-01-23 - forwardRef with Named Imports
+
+**Context:** Creating Alert component using forwardRef pattern
+**Problem:** Lint error "noNamespaceImport" when using `import * as React from "react"`
+**Solution:** Use named imports: `import { forwardRef, type HTMLAttributes } from "react"`
+**Lesson:** Even for patterns that traditionally use namespace imports (like forwardRef components), use named imports to satisfy the linter and improve tree-shaking

@@ -14,13 +14,6 @@ import { Card } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
 import { useSettings } from "@/lib/hooks/use-settings";
 import type { Project } from "@/types/project";
-import type { MainTheme } from "@/types/theme";
-
-interface ThemeStats {
-	mainThemes: number;
-	miniThemes: number;
-	questions: number;
-}
 
 interface StatCardProps {
 	label: string;
@@ -78,72 +71,47 @@ function ConnectionStatus({
 }
 
 export function DashboardStats() {
-	const { settings, isHydrated, isNotionConnected, hasThemePage } =
-		useSettings();
+	const { settings, isHydrated } = useSettings();
 	const projects = useQuery(api.projects.list) as Project[] | undefined;
-	const [themeStats, setThemeStats] = useState<ThemeStats | null>(null);
-	const [isLoadingThemes, setIsLoadingThemes] = useState(false);
+	const themePages = useQuery(api.themePages.list);
+	const [isNotionConnected, setIsNotionConnected] = useState(false);
+	const [isCheckingNotion, setIsCheckingNotion] = useState(true);
 
-	// Fetch theme stats if theme page is configured
+	// Check Notion connection via API
 	useEffect(() => {
-		const fetchThemeStats = async () => {
-			if (!(settings.themePageId && settings.notionApiKey)) {
-				setThemeStats(null);
-				return;
-			}
-
-			setIsLoadingThemes(true);
+		async function checkConnection() {
 			try {
-				const response = await fetch("/api/themes", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						pageId: settings.themePageId,
-						apiKey: settings.notionApiKey,
-					}),
-				});
-
-				if (response.ok) {
-					const data = (await response.json()) as { themes: MainTheme[] };
-					const themes = data.themes;
-
-					// Calculate stats
-					const mainThemes = themes.length;
-					const miniThemes = themes.reduce(
-						(acc, t) => acc + t.miniThemes.length,
-						0
-					);
-					const questions = themes.reduce(
-						(acc, t) =>
-							acc +
-							t.miniThemes.reduce((acc2, mt) => acc2 + mt.questions.length, 0),
-						0
-					);
-
-					setThemeStats({ mainThemes, miniThemes, questions });
-				} else {
-					setThemeStats(null);
-				}
+				const response = await fetch("/api/notion/connect", { method: "GET" });
+				const data = (await response.json()) as { valid: boolean };
+				setIsNotionConnected(data.valid);
 			} catch {
-				setThemeStats(null);
+				setIsNotionConnected(false);
 			} finally {
-				setIsLoadingThemes(false);
+				setIsCheckingNotion(false);
 			}
-		};
-
-		if (isHydrated && hasThemePage) {
-			fetchThemeStats();
 		}
-	}, [isHydrated, hasThemePage, settings.themePageId, settings.notionApiKey]);
+
+		checkConnection();
+	}, []);
 
 	// Show loading state until hydrated
-	const isLoading = !isHydrated || projects === undefined;
+	const isLoading = !isHydrated || projects === undefined || isCheckingNotion;
 
 	// Check if LLM is configured (has custom model config)
 	const hasModelConfig =
 		settings.modelConfig && Object.keys(settings.modelConfig).length > 0;
+
+	// Aggregate theme stats from all theme pages
+	const aggregatedStats = themePages?.reduce(
+		(acc, tp) => ({
+			mainThemes: acc.mainThemes + (tp.stats?.mainThemes ?? 0),
+			miniThemes: acc.miniThemes + (tp.stats?.miniThemes ?? 0),
+			questions: acc.questions + (tp.stats?.questions ?? 0),
+		}),
+		{ mainThemes: 0, miniThemes: 0, questions: 0 }
+	) ?? { mainThemes: 0, miniThemes: 0, questions: 0 };
+
+	const hasThemePages = (themePages?.length ?? 0) > 0;
 
 	return (
 		<div className="space-y-6">
@@ -151,15 +119,15 @@ export function DashboardStats() {
 			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 				<StatCard
 					icon={<BookOpen className="size-5" />}
-					isLoading={isLoading || isLoadingThemes}
+					isLoading={isLoading}
 					label="Main Themes"
-					value={themeStats?.mainThemes ?? "-"}
+					value={hasThemePages ? aggregatedStats.mainThemes : "-"}
 				/>
 				<StatCard
 					icon={<FileQuestion className="size-5" />}
-					isLoading={isLoading || isLoadingThemes}
+					isLoading={isLoading}
 					label="Questions"
-					value={themeStats?.questions ?? "-"}
+					value={hasThemePages ? aggregatedStats.questions : "-"}
 				/>
 				<StatCard
 					icon={<FolderKanban className="size-5" />}
@@ -169,9 +137,9 @@ export function DashboardStats() {
 				/>
 				<StatCard
 					icon={<BookOpen className="size-5" />}
-					isLoading={isLoading || isLoadingThemes}
+					isLoading={isLoading}
 					label="Mini Themes"
-					value={themeStats?.miniThemes ?? "-"}
+					value={hasThemePages ? aggregatedStats.miniThemes : "-"}
 				/>
 			</div>
 
@@ -184,9 +152,9 @@ export function DashboardStats() {
 						label="Notion API"
 					/>
 					<ConnectionStatus
-						detail={settings.themePageTitle}
-						isConnected={hasThemePage}
-						label="Theme Page"
+						detail={`${themePages?.length ?? 0} theme pages`}
+						isConnected={hasThemePages}
+						label="Theme Pages"
 					/>
 					<ConnectionStatus
 						detail={hasModelConfig ? "Custom config" : "Using defaults"}

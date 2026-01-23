@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { deleteFromR2, validateR2Config } from "@/lib/storage";
 
 /**
- * POST /api/upload/delete
+ * POST /api/storage/delete
  * Deletes a file from R2 storage.
  *
  * Expects JSON body with:

@@ -3,7 +3,6 @@
 import { useMutation } from "convex/react";
 import { CheckCircle, ExternalLink, Loader2, Upload } from "lucide-react";
 import { useState } from "react";
-import type { UploadResponse } from "@/app/api/upload/route";
 import { NotionPageSearch } from "@/components/notion-page-search";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +18,7 @@ import { UploadZone } from "@/components/upload-zone";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
+import type { UploadResponse } from "@/types/upload";
 
 interface AddSourceDialogProps {
 	trigger: React.ReactNode;

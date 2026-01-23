@@ -1,13 +1,18 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock fetch for API calls
+global.fetch = vi.fn();
 
 // Mock the hooks
 vi.mock("@/lib/hooks/use-settings", () => ({
 	useSettings: vi.fn(() => ({
 		settings: {},
 		isHydrated: true,
-		isNotionConnected: false,
-		hasThemePage: false,
+		updateSetting: vi.fn(),
+		updateSettings: vi.fn(),
+		clearSetting: vi.fn(),
+		resetSettings: vi.fn(),
 	})),
 }));
 
@@ -23,20 +28,27 @@ import { DashboardStats } from "../dashboard-stats";
 describe("DashboardStats", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// Default: Notion not connected
+		vi.mocked(global.fetch).mockResolvedValue({
+			json: () => Promise.resolve({ valid: false }),
+		} as Response);
 	});
 
-	it("renders stats cards with default values when no data", () => {
+	it("renders stats cards with default values when no data", async () => {
 		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
 
-		expect(screen.getByText("Main Themes")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Main Themes")).toBeInTheDocument();
+		});
 		expect(screen.getByText("Questions")).toBeInTheDocument();
 		expect(screen.getByText("Projects")).toBeInTheDocument();
 		expect(screen.getByText("Mini Themes")).toBeInTheDocument();
 	});
 
-	it("shows project count from hook", () => {
-		vi.mocked(useQuery).mockReturnValue([
+	it("shows project count from hook", async () => {
+		// Mock useQuery to return projects for any query (simplifies testing)
+		const mockProjects = [
 			{
 				id: "1",
 				name: "Test",
@@ -51,29 +63,33 @@ describe("DashboardStats", () => {
 				updatedAt: "",
 				sources: [],
 			},
-		]);
+		];
+		vi.mocked(useQuery).mockReturnValue(mockProjects);
 
 		render(<DashboardStats />);
-		expect(screen.getByText("2")).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(screen.getByText("2")).toBeInTheDocument();
+		});
 	});
 
-	it("renders connection status section", () => {
+	it("renders connection status section", async () => {
 		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
 
-		expect(screen.getByText("Connection Status")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Connection Status")).toBeInTheDocument();
+		});
 		expect(screen.getByText("Notion API")).toBeInTheDocument();
-		expect(screen.getByText("Theme Page")).toBeInTheDocument();
+		expect(screen.getByText("Theme Pages")).toBeInTheDocument();
 		expect(screen.getByText("LLM Models")).toBeInTheDocument();
 	});
 
-	it("shows not configured when Notion is not connected", () => {
+	it("shows not configured when Notion is not connected", async () => {
 		vi.mocked(useQuery).mockReturnValue([]);
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
-			isNotionConnected: false,
-			hasThemePage: false,
 			updateSetting: vi.fn(),
 			updateSettings: vi.fn(),
 			clearSetting: vi.fn(),
@@ -81,25 +97,29 @@ describe("DashboardStats", () => {
 		});
 
 		render(<DashboardStats />);
-		const notConfiguredElements = screen.getAllByText("Not configured");
-		expect(notConfiguredElements.length).toBeGreaterThanOrEqual(2);
+
+		await waitFor(() => {
+			const notConfiguredElements = screen.getAllByText("Not configured");
+			expect(notConfiguredElements.length).toBeGreaterThanOrEqual(2);
+		});
 	});
 
-	it("shows using defaults for LLM when no custom config", () => {
+	it("shows using defaults for LLM when no custom config", async () => {
 		vi.mocked(useQuery).mockReturnValue([]);
 		render(<DashboardStats />);
-		expect(screen.getByText("Using defaults")).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(screen.getByText("Using defaults")).toBeInTheDocument();
+		});
 	});
 
-	it("shows custom config when model config exists", () => {
+	it("shows custom config when model config exists", async () => {
 		vi.mocked(useQuery).mockReturnValue([]);
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {
 				modelConfig: { ocr: "custom-model" },
 			},
 			isHydrated: true,
-			isNotionConnected: false,
-			hasThemePage: false,
 			updateSetting: vi.fn(),
 			updateSettings: vi.fn(),
 			clearSetting: vi.fn(),
@@ -107,6 +127,9 @@ describe("DashboardStats", () => {
 		});
 
 		render(<DashboardStats />);
-		expect(screen.getByText("Custom config")).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(screen.getByText("Custom config")).toBeInTheDocument();
+		});
 	});
 });

@@ -3,7 +3,6 @@
 import { useMutation, useQuery } from "convex/react";
 import { CheckCircle2, FileImage, FileText } from "lucide-react";
 import { useState } from "react";
-import type { UploadResponse } from "@/app/api/upload/route";
 import { Card } from "@/components/ui/card";
 import {
 	Select,
@@ -17,6 +16,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
 import type { Project } from "@/types/project";
+import type { UploadResponse } from "@/types/upload";
 
 interface UploadedFile {
 	response: UploadResponse;

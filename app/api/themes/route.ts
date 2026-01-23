@@ -4,21 +4,20 @@
 
 import { NextResponse } from "next/server";
 import { NotionClient } from "@/lib/notion/client";
-import { getNotionApiKey } from "@/lib/notion/config";
+import { getNotionApiKey, hasEnvApiKey } from "@/lib/notion/config";
 import { getThemeStats, parseThemePage } from "@/lib/notion/theme-parser";
 import { createLogger } from "@/lib/utils/logger";
 
 const log = createLogger("api/themes");
 
 interface ThemesRequestBody {
-	apiKey?: string;
 	pageId: string;
 }
 
 /**
  * GET /api/themes?pageId=xxx
- * Fetches themes from a Notion page (requires API key in query or expects it from body).
- * For simplicity, this endpoint uses POST for passing the API key securely.
+ * Fetches themes from a Notion page.
+ * For simplicity, this endpoint uses POST for passing pageId securely.
  */
 export function GET() {
 	return NextResponse.json(
@@ -32,33 +31,30 @@ export function GET() {
 /**
  * POST /api/themes
  * Fetches and parses themes from a Notion page.
- * Uses NOTION_API_KEY env variable if set, otherwise uses apiKey from request body.
+ * Uses NOTION_API_KEY environment variable only.
  *
- * Body: { apiKey?: string, pageId: string }
+ * Body: { pageId: string }
  * Returns: { themes, pageTitle, parsedAt, stats }
  */
 export async function POST(request: Request) {
 	log.info("POST /api/themes - Starting theme parsing request");
 
+	if (!hasEnvApiKey()) {
+		log.warn("NOTION_API_KEY not configured");
+		return NextResponse.json(
+			{
+				error:
+					"NOTION_API_KEY environment variable not configured. Add it to your .env.local file.",
+			},
+			{ status: 400 }
+		);
+	}
+
 	try {
 		const body = (await request.json()) as ThemesRequestBody;
 		const { pageId } = body;
-		const apiKey = getNotionApiKey(body.apiKey);
 
 		log.info(`Parsing themes for pageId: ${pageId}`);
-		log.debug(`API key present: ${!!apiKey}, from body: ${!!body.apiKey}`);
-
-		// Validate required fields
-		if (!apiKey) {
-			log.warn("No API key configured");
-			return NextResponse.json(
-				{
-					error:
-						"No API key configured. Set NOTION_API_KEY environment variable or provide apiKey in request.",
-				},
-				{ status: 400 }
-			);
-		}
 
 		if (!pageId) {
 			log.warn("No pageId provided");
@@ -69,6 +65,7 @@ export async function POST(request: Request) {
 		}
 
 		// Create client and parse themes
+		const apiKey = getNotionApiKey();
 		const client = new NotionClient(apiKey);
 		log.info("Starting parseThemePage...");
 		const themeData = await parseThemePage(client, pageId);

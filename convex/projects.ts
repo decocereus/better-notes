@@ -58,6 +58,25 @@ export const get = query({
 });
 
 /**
+ * Get projects using a specific theme page.
+ * Used to warn users before deleting a theme page.
+ */
+export const listByThemePage = query({
+	args: { themePageId: v.id("themePages") },
+	handler: async (ctx, args) => {
+		const projects = await ctx.db
+			.query("projects")
+			.withIndex("by_theme_page", (q) => q.eq("themePageId", args.themePageId))
+			.collect();
+
+		return projects.map((project) => ({
+			...project,
+			id: project._id,
+		}));
+	},
+});
+
+/**
  * Get recent projects (limited).
  */
 export const recent = query({
@@ -92,17 +111,26 @@ export const recent = query({
 
 /**
  * Create a new project.
+ * Requires a themePageId - projects must have a theme page.
  */
 export const create = mutation({
 	args: {
 		name: v.string(),
 		description: v.optional(v.string()),
+		themePageId: v.id("themePages"),
 	},
 	handler: async (ctx, args) => {
+		// Verify theme page exists
+		const themePage = await ctx.db.get(args.themePageId);
+		if (!themePage) {
+			throw new Error("Theme page not found");
+		}
+
 		const now = new Date().toISOString();
 		const projectId = await ctx.db.insert("projects", {
 			name: args.name.trim(),
 			description: args.description?.trim() || undefined,
+			themePageId: args.themePageId,
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -119,6 +147,7 @@ export const update = mutation({
 		id: v.id("projects"),
 		name: v.optional(v.string()),
 		description: v.optional(v.string()),
+		themePageId: v.optional(v.id("themePages")),
 	},
 	handler: async (ctx, args) => {
 		const existing = await ctx.db.get(args.id);
@@ -135,6 +164,14 @@ export const update = mutation({
 		}
 		if (args.description !== undefined) {
 			updates.description = args.description.trim() || undefined;
+		}
+		if (args.themePageId !== undefined) {
+			// Verify theme page exists
+			const themePage = await ctx.db.get(args.themePageId);
+			if (!themePage) {
+				throw new Error("Theme page not found");
+			}
+			updates.themePageId = args.themePageId;
 		}
 
 		await ctx.db.patch(args.id, updates);

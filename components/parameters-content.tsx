@@ -54,8 +54,7 @@ const EXAMPLE_CATEGORIES: { value: ExampleCategory; label: string }[] = [
  * Parameters page content - configures strategy document and extraction parameters.
  */
 export function ParametersContent() {
-	const { settings, isHydrated, updateSettings, isNotionConnected } =
-		useSettings();
+	const { settings, isHydrated, updateSettings } = useSettings();
 	const [isCheckingConnection, setIsCheckingConnection] = useState(true);
 	const [isConnected, setIsConnected] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
@@ -144,8 +143,8 @@ export function ParametersContent() {
 		});
 	};
 
-	// Combine API check with localStorage check
-	const notionReady = isConnected || isNotionConnected;
+	// Use API check for connection status
+	const notionReady = isConnected;
 
 	if (!isHydrated || isCheckingConnection) {
 		return (

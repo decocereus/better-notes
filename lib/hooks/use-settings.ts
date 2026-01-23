@@ -6,14 +6,10 @@ import { useLocalStorage } from "./use-local-storage";
 
 /**
  * Application settings stored in localStorage.
+ * Note: Notion API key is now from environment variable only.
+ * Theme pages are stored in Convex, not localStorage.
  */
 export interface AppSettings {
-	/** Notion API key for authentication */
-	notionApiKey?: string;
-	/** Selected theme page ID in Notion */
-	themePageId?: string;
-	/** Title of the selected theme page */
-	themePageTitle?: string;
 	/** Selected strategy page ID in Notion */
 	strategyPageId?: string;
 	/** Selected output page ID in Notion */
@@ -80,16 +76,6 @@ export function useSettings() {
 		setSettings(DEFAULT_SETTINGS);
 	}, [setSettings]);
 
-	/**
-	 * Checks if Notion is connected (has API key).
-	 */
-	const isNotionConnected = Boolean(settings.notionApiKey);
-
-	/**
-	 * Checks if a theme page is configured.
-	 */
-	const hasThemePage = Boolean(settings.themePageId);
-
 	return {
 		settings,
 		isHydrated,
@@ -97,7 +83,5 @@ export function useSettings() {
 		updateSettings,
 		clearSetting,
 		resetSettings,
-		isNotionConnected,
-		hasThemePage,
 	};
 }

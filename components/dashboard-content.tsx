@@ -1,13 +1,22 @@
 "use client";
 
-import { ArrowRight, CheckCircle2, Circle, Settings } from "lucide-react";
+import { useQuery } from "convex/react";
+import {
+	ArrowRight,
+	CheckCircle2,
+	Circle,
+	Loader2,
+	Settings,
+} from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { DashboardStats } from "@/components/dashboard-stats";
 import { QuickActions } from "@/components/quick-actions";
 import { RecentProjects } from "@/components/recent-projects";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { api } from "@/convex/_generated/api";
 import { useSettings } from "@/lib/hooks/use-settings";
 
 interface SetupStepProps {
@@ -38,15 +47,49 @@ function SetupStep({ label, isComplete, href }: SetupStepProps) {
 }
 
 function SetupWizard() {
-	const { isNotionConnected, hasThemePage, settings } = useSettings();
+	const { settings } = useSettings();
+	const themePages = useQuery(api.themePages.list);
+	const [isNotionConnected, setIsNotionConnected] = useState(false);
+	const [isChecking, setIsChecking] = useState(true);
+
+	// Check Notion connection via API
+	useEffect(() => {
+		async function checkConnection() {
+			try {
+				const response = await fetch("/api/notion/connect", { method: "GET" });
+				const data = (await response.json()) as { valid: boolean };
+				setIsNotionConnected(data.valid);
+			} catch {
+				setIsNotionConnected(false);
+			} finally {
+				setIsChecking(false);
+			}
+		}
+
+		checkConnection();
+	}, []);
 
 	// Check if models are configured (beyond defaults)
 	const hasModelConfig = Boolean(
 		settings.modelConfig && Object.keys(settings.modelConfig).length > 0
 	);
 
+	// Check if any theme pages exist
+	const hasThemePages = (themePages?.length ?? 0) > 0;
+
 	// All setup steps complete
-	const isComplete = isNotionConnected && hasThemePage;
+	const isComplete = isNotionConnected && hasThemePages;
+
+	// Show loading while checking
+	if (isChecking || themePages === undefined) {
+		return (
+			<Card>
+				<CardContent className="flex items-center justify-center py-8">
+					<Loader2 className="size-6 animate-spin text-muted-foreground" />
+				</CardContent>
+			</Card>
+		);
+	}
 
 	if (isComplete) {
 		return null;
@@ -54,7 +97,7 @@ function SetupWizard() {
 
 	const completedCount = [
 		isNotionConnected,
-		hasThemePage,
+		hasThemePages,
 		hasModelConfig,
 	].filter(Boolean).length;
 
@@ -77,8 +120,8 @@ function SetupWizard() {
 					/>
 					<SetupStep
 						href="/themes"
-						isComplete={hasThemePage}
-						label="Select Theme Page"
+						isComplete={hasThemePages}
+						label="Add Theme Page"
 					/>
 					<SetupStep
 						href="/settings/models"

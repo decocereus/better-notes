@@ -31,8 +31,8 @@ describe("upload constants", () => {
 	});
 
 	describe("MAX_FILE_SIZE_BYTES", () => {
-		it("equals 10MB in bytes", () => {
-			expect(MAX_FILE_SIZE_BYTES).toBe(10 * 1024 * 1024);
+		it("equals 500MB in bytes", () => {
+			expect(MAX_FILE_SIZE_BYTES).toBe(500 * 1024 * 1024);
 		});
 	});
 
@@ -130,7 +130,7 @@ describe("formatFileSize", () => {
 		expect(formatFileSize(1.5 * 1024 * 1024 * 1024)).toBe("1.5 GB");
 	});
 
-	it("formats 10MB (max file size)", () => {
-		expect(formatFileSize(MAX_FILE_SIZE_BYTES)).toBe("10 MB");
+	it("formats 500MB (max file size)", () => {
+		expect(formatFileSize(MAX_FILE_SIZE_BYTES)).toBe("500 MB");
 	});
 });

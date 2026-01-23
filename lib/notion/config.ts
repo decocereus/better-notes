@@ -1,26 +1,22 @@
 /**
  * Notion configuration helper.
- * Provides the API key from environment variable or request body.
+ * Provides the API key from environment variable only.
  */
 
 /**
- * Gets the Notion API key, prioritizing env variable over request body.
- * @param requestApiKey - API key from request body (fallback)
- * @returns The API key to use, or null if none available
+ * Gets the Notion API key from environment variable.
+ * @throws Error if NOTION_API_KEY is not configured
+ * @returns The API key
  */
-export function getNotionApiKey(requestApiKey?: string): string | null {
-	// Prefer env variable
+export function getNotionApiKey(): string {
 	const envKey = process.env.NOTION_API_KEY;
-	if (envKey) {
-		return envKey;
+	if (!envKey) {
+		throw new Error(
+			"NOTION_API_KEY environment variable is not configured. " +
+				"Please add it to your .env.local file."
+		);
 	}
-
-	// Fall back to request body
-	if (requestApiKey) {
-		return requestApiKey;
-	}
-
-	return null;
+	return envKey;
 }
 
 /**

@@ -40,6 +40,7 @@ export interface Project {
 	id: string;
 	name: string;
 	description?: string;
+	themePageId?: string;
 	createdAt: string;
 	updatedAt: string;
 	sources: ContentSource[];

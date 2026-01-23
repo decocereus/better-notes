@@ -13,13 +13,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { useSettings } from "@/lib/hooks/use-settings";
 import { cn } from "@/lib/utils";
 import type { ProcessingJobStatus } from "@/types";
 
 interface ClassificationWorkflowProps {
 	/** Extraction job ID to classify content from */
 	extractionJobId: string;
+	/** Theme page ID for classification (from project's themePageId) */
+	themePageId: string;
 	/** Called when classification completes */
 	onComplete?: (classificationJobId: string) => void;
 	/** Called when classification fails */
@@ -100,22 +101,19 @@ function StatusIcon({ status }: { status: ProcessingJobStatus }) {
  */
 export function ClassificationWorkflow({
 	extractionJobId,
+	themePageId,
 	onComplete,
 	onError,
 	className,
 }: ClassificationWorkflowProps) {
-	const { settings } = useSettings();
-
 	const [jobState, setJobState] = useState<ClassificationJobState | null>(null);
 	const [results, setResults] = useState<ClassificationResults | null>(null);
 	const [isStarting, setIsStarting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const hasThemePage = Boolean(settings.themePageId);
-
 	const startClassification = useStartClassification({
 		extractionJobId,
-		themePageId: settings.themePageId,
+		themePageId,
 		setJobState,
 		setError,
 		setIsStarting,
@@ -151,7 +149,6 @@ export function ClassificationWorkflow({
 		return (
 			<NotStartedState
 				className={className}
-				hasThemePage={hasThemePage}
 				isStarting={isStarting}
 				onStart={startClassification}
 			/>
@@ -196,18 +193,13 @@ function useStartClassification({
 	onError,
 }: {
 	extractionJobId: string;
-	themePageId: string | undefined;
+	themePageId: string;
 	setJobState: (state: ClassificationJobState | null) => void;
 	setError: (error: string | null) => void;
 	setIsStarting: (starting: boolean) => void;
 	onError?: (error: string) => void;
 }) {
 	return useCallback(async () => {
-		if (!themePageId) {
-			setError("No theme page selected. Please configure in Themes settings.");
-			return;
-		}
-
 		setIsStarting(true);
 		setError(null);
 
@@ -343,12 +335,10 @@ function usePollJobStatus({
  * Not started state component.
  */
 function NotStartedState({
-	hasThemePage,
 	isStarting,
 	onStart,
 	className,
 }: {
-	hasThemePage: boolean;
 	isStarting: boolean;
 	onStart: () => void;
 	className?: string;
@@ -363,13 +353,11 @@ function NotStartedState({
 					<div>
 						<h4 className="font-medium">Theme Classification</h4>
 						<p className="text-muted-foreground text-sm">
-							{hasThemePage
-								? "Classify extracted content into themes"
-								: "Configure theme page in Themes settings first"}
+							Classify extracted content into themes
 						</p>
 					</div>
 				</div>
-				<Button disabled={!hasThemePage || isStarting} onClick={onStart}>
+				<Button disabled={isStarting} onClick={onStart}>
 					{isStarting ? (
 						<>
 							<Loader2 className="size-4 animate-spin" />

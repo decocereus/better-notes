@@ -1,5 +1,6 @@
 /**
  * Upload-related constants for file handling.
+ * All uploads go directly to R2 storage.
  */
 
 /**
@@ -20,14 +21,14 @@ export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
 export const ALLOWED_FILE_TYPES_DISPLAY = "PDF, PNG, JPEG, or WebP";
 
 /**
- * Maximum file size in bytes (10MB)
+ * Maximum file size in bytes (500MB) - R2 direct upload limit
  */
-export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024;
 
 /**
  * Maximum file size in human-readable format
  */
-export const MAX_FILE_SIZE_DISPLAY = "10MB";
+export const MAX_FILE_SIZE_DISPLAY = "500MB";
 
 /**
  * Map MIME type to ContentSourceType

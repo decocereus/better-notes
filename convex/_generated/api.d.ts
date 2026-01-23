@@ -10,6 +10,7 @@
 
 import type * as projects from "../projects.js";
 import type * as settings from "../settings.js";
+import type * as themePages from "../themePages.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   settings: typeof settings;
+  themePages: typeof themePages;
 }>;
 
 /**

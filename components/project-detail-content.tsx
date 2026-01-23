@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery } from "convex/react";
 import {
+	AlertTriangle,
 	ArrowLeft,
+	BookOpen,
 	FileText,
 	Link as LinkIcon,
 	MoreVertical,
@@ -14,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AddSourceDialog } from "@/components/add-source-dialog";
+import { AddThemePageDialog } from "@/components/add-theme-page-dialog";
 import { SourceList } from "@/components/source-list";
 import {
 	AlertDialog,
@@ -25,6 +28,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -35,9 +39,28 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectSeparator,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { ContentSource, Project } from "@/types/project";
+
+interface ThemePage {
+	_id: string;
+	id: string;
+	title: string;
+	stats: {
+		mainThemes: number;
+		miniThemes: number;
+		questions: number;
+	};
+}
 
 interface ProjectDetailContentProps {
 	projectId: string;
@@ -50,14 +73,27 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const project = useQuery(api.projects.get, {
 		id: projectId as Id<"projects">,
 	}) as Project | null | undefined;
+
+	const themePages = useQuery(api.themePages.list) as ThemePage[] | undefined;
+
+	const themePage = useQuery(
+		api.themePages.get,
+		project?.themePageId
+			? { id: project.themePageId as Id<"themePages"> }
+			: "skip"
+	) as ThemePage | null | undefined;
+
 	const removeProject = useMutation(api.projects.remove);
 	const removeSource = useMutation(api.projects.removeSource);
+	const updateProject = useMutation(api.projects.update);
 
 	const [deleteSourceId, setDeleteSourceId] = useState<string | null>(null);
 	const [isDeletingSource, setIsDeletingSource] = useState(false);
 	const [showDeleteProject, setShowDeleteProject] = useState(false);
 	const [isDeletingProject, setIsDeletingProject] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [showAddThemePage, setShowAddThemePage] = useState(false);
+	const [isUpdatingTheme, setIsUpdatingTheme] = useState(false);
 
 	const handleDeleteSource = async () => {
 		if (!deleteSourceId) {
@@ -94,6 +130,47 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			setError(err instanceof Error ? err.message : "Failed to delete project");
 			setIsDeletingProject(false);
 			setShowDeleteProject(false);
+		}
+	};
+
+	const handleThemePageChange = async (value: string) => {
+		if (value === "add-new") {
+			setShowAddThemePage(true);
+			return;
+		}
+
+		setIsUpdatingTheme(true);
+		setError(null);
+
+		try {
+			await updateProject({
+				id: projectId as Id<"projects">,
+				themePageId: value as Id<"themePages">,
+			});
+		} catch (err) {
+			setError(
+				err instanceof Error ? err.message : "Failed to update theme page"
+			);
+		} finally {
+			setIsUpdatingTheme(false);
+		}
+	};
+
+	const handleThemePageAdded = async (newThemePageId: Id<"themePages">) => {
+		setIsUpdatingTheme(true);
+		setError(null);
+
+		try {
+			await updateProject({
+				id: projectId as Id<"projects">,
+				themePageId: newThemePageId,
+			});
+		} catch (err) {
+			setError(
+				err instanceof Error ? err.message : "Failed to update theme page"
+			);
+		} finally {
+			setIsUpdatingTheme(false);
 		}
 	};
 
@@ -135,6 +212,10 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			</div>
 		);
 	}
+
+	// Check if theme page is missing (deleted)
+	const isThemePageMissing = project.themePageId && themePage === null;
+	const hasThemePages = themePages && themePages.length > 0;
 
 	return (
 		<div className="space-y-6">
@@ -192,6 +273,87 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			{error && (
 				<Card className="border-destructive bg-destructive/10 p-4">
 					<p className="text-destructive text-sm">{error}</p>
+				</Card>
+			)}
+
+			{/* Theme Page Warning/Selection */}
+			{isThemePageMissing && (
+				<Card className="border-amber-500/50 bg-amber-500/10 p-4">
+					<div className="flex items-start gap-3">
+						<AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-500" />
+						<div className="flex-1 space-y-3">
+							<div>
+								<h4 className="font-medium text-amber-600 dark:text-amber-500">
+									Theme Page Unavailable
+								</h4>
+								<p className="text-muted-foreground text-sm">
+									The theme page for this project was deleted. Select a new one
+									to continue with classification.
+								</p>
+							</div>
+							<Select
+								disabled={isUpdatingTheme}
+								onValueChange={handleThemePageChange}
+								value=""
+							>
+								<SelectTrigger className="w-full max-w-sm">
+									<SelectValue placeholder="Select a theme page..." />
+								</SelectTrigger>
+								<SelectContent>
+									{hasThemePages ? (
+										<>
+											{themePages.map((page) => (
+												<SelectItem key={page.id} value={page.id}>
+													{page.title} ({page.stats.questions} questions)
+												</SelectItem>
+											))}
+											<SelectSeparator />
+											<SelectItem value="add-new">
+												<span className="flex items-center gap-2">
+													<Plus className="size-4" />
+													Add new theme page...
+												</span>
+											</SelectItem>
+										</>
+									) : (
+										<SelectItem value="add-new">
+											<span className="flex items-center gap-2">
+												<Plus className="size-4" />
+												Add your first theme page...
+											</span>
+										</SelectItem>
+									)}
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+				</Card>
+			)}
+
+			{/* Theme Page Info */}
+			{themePage && (
+				<Card className="p-4">
+					<div className="flex items-center gap-3">
+						<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+							<BookOpen className="size-5 text-primary" />
+						</div>
+						<div className="flex-1">
+							<Link
+								className="font-medium hover:underline"
+								href={`/themes/${themePage.id}`}
+							>
+								{themePage.title}
+							</Link>
+							<div className="flex flex-wrap gap-2">
+								<Badge className="text-xs" variant="secondary">
+									{themePage.stats.mainThemes} main themes
+								</Badge>
+								<Badge className="text-xs" variant="outline">
+									{themePage.stats.questions} questions
+								</Badge>
+							</div>
+						</div>
+					</div>
 				</Card>
 			)}
 
@@ -289,6 +451,13 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
+
+			{/* Controlled AddThemePageDialog */}
+			<AddThemePageDialog
+				onOpenChange={setShowAddThemePage}
+				onThemePageAdded={handleThemePageAdded}
+				open={showAddThemePage}
+			/>
 		</div>
 	);
 }
@@ -300,7 +469,7 @@ function shouldDeleteFromR2Storage(source: ContentSource): boolean {
 }
 
 async function deleteFileFromR2Storage(key: string): Promise<void> {
-	const response = await fetch("/api/upload/delete", {
+	const response = await fetch("/api/storage/delete", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ key }),

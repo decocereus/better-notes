@@ -4,8 +4,142 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
-**All Sprints Complete** ✅ - Phase 1 & 2 fully implemented
+**Sprint 13 Complete** ✅ - Multi-Theme Pages Feature
 **Build Status:** ✅ Passing (all issues resolved)
+**Tests:** ✅ 137+ passing
+
+---
+
+## Sprint 13 - Multi-Theme Pages (2026-01-23) - Complete
+
+### Sprint 13.2: API & Settings Cleanup ✅ Completed
+
+**Goal:** Remove global themePageId from settings, update components to use Convex
+
+**Completed Tasks:**
+- [x] 13.2.1: Removed themePageId/themePageTitle from AppSettings type
+- [x] 13.2.2: Updated API routes to get theme data from Convex (classify, themes routes)
+- [x] 13.2.3: Updated settings-client-wrapper.tsx to check Notion connection via API
+- [x] 13.2.4: Updated parameters-content.tsx to check connection via API
+- [x] 13.2.5: Rewrote dashboard-stats.tsx to aggregate stats from all theme pages in Convex
+- [x] 13.2.6: Rewrote themes-content.tsx to list theme pages from Convex
+- [x] 13.2.7: Updated global-compare-content.tsx to show "select project" message
+- [x] 13.2.8: Updated theme-compare-content.tsx to show "select project" message
+- [x] 13.2.9: Updated theme-detail-content.tsx to show "select project" message
+- [x] 13.2.10: Updated dashboard-content.tsx SetupWizard to use API and Convex
+- [x] 13.2.11: Updated classification-workflow.tsx to accept themePageId as required prop
+- [x] 13.2.12: Fixed all TypeScript errors from removed settings properties
+- [x] 13.2.13: Updated tests to use proper mocks for API calls and Convex queries
+
+**Key Changes:**
+- Notion connection now checked via `/api/notion/connect` API (returns `{ valid: boolean }`)
+- Theme pages now fetched from Convex via `useQuery(api.themePages.list)`
+- Dashboard stats aggregate from ALL theme pages (not just one global page)
+- Compare/detail pages show "Select a Project" since themes are per-project
+- ClassificationWorkflow now requires `themePageId` prop (not from settings)
+
+### Sprint 13.1: Schema & Convex Functions ✅ Completed
+
+**Goal:** Set up database foundation for multi-theme pages
+
+**Completed Tasks:**
+- [x] 13.1.1: Updated `convex/schema.ts` - added themePages table with notionPageId, title, themes array, stats object, lastSyncedAt, createdAt; added themePageId reference to projects; added indexes
+- [x] 13.1.2: Created `convex/themePages.ts` - list, get, getByNotionId, create, sync, remove functions
+- [x] 13.1.3: Updated `convex/projects.ts` - added themePageId to create mutation, added listByThemePage query, updated update mutation to support themePageId
+- [x] 13.1.4: Deleted existing projects (clean slate migration)
+- [x] 13.1.5: Deployed schema changes with `bunx convex dev`
+
+**Additional Changes (to fix TypeScript errors):**
+- [x] Updated `components/create-project-dialog.tsx` - added theme page selector dropdown with useQuery for theme pages list
+- [x] Updated `biome.jsonc` - added override for convex/ directory to use camelCase filenames (Convex requirement)
+
+**Key Schema Changes:**
+```typescript
+// New themePages table
+themePages: defineTable({
+  notionPageId: v.string(),
+  title: v.string(),
+  themes: v.array(v.any()),  // MainTheme[]
+  stats: v.object({
+    mainThemes: v.number(),
+    miniThemes: v.number(),
+    questions: v.number(),
+    yearRange: v.optional(v.object({ min: v.number(), max: v.number() })),
+  }),
+  lastSyncedAt: v.string(),
+  createdAt: v.string(),
+})
+
+// Modified projects table
+projects: defineTable({
+  ...existing fields,
+  themePageId: v.id("themePages"),  // Required reference
+})
+```
+
+### Sprint 13.6: Testing & Cleanup ✅ Completed
+
+**Goal:** Final testing, bug fixes, and cleanup
+
+**Completed Tasks:**
+- [x] 13.6.1: Created `components/ui/alert.tsx` - Alert, AlertTitle, AlertDescription components
+- [x] 13.6.2: Updated `types/project.ts` - Added `themePageId` to Project interface
+- [x] 13.6.3: Fixed namespace import lint error in alert.tsx
+- [x] 13.6.4: Verified all TypeScript errors resolved (`bun run check` passes)
+- [x] 13.6.5: Verified all tests pass (`bun run test`)
+
+### Sprint 13.5: Project Creation Flow ✅ Completed
+
+**Goal:** Update project creation and detail views for required theme page selection
+
+**Completed Tasks:**
+- [x] 13.5.1: Updated `components/add-theme-page-dialog.tsx` - Made controllable with `open`/`onOpenChange` props
+- [x] 13.5.2: Updated `components/create-project-dialog.tsx` - Integrated controlled AddThemePageDialog, inline "Add new theme page" option
+- [x] 13.5.3: Updated `components/project-detail-content.tsx` - Added missing theme page warning with reassignment dropdown
+- [x] 13.5.4: Added theme page info card when theme is valid
+
+**Key Changes:**
+- AddThemePageDialog supports both trigger-based and controlled modes
+- Project creation shows inline "Add new theme page" option when no theme pages exist
+- Project detail shows warning when theme page was deleted with option to select another
+- Theme page info card displays stats and links to theme detail page
+
+### Sprint 13.4: Theme Page Detail UI ✅ Completed
+
+**Goal:** Build theme page detail view with resync and delete functionality
+
+**Completed Tasks:**
+- [x] 13.4.1: Rewrote `components/theme-detail-content.tsx` - Complete rewrite with Convex integration
+- [x] 13.4.2: Added resync functionality - Fetches latest from Notion and updates Convex
+- [x] 13.4.3: Added delete functionality with affected projects warning
+- [x] 13.4.4: Added theme tree display with stats
+
+**Key Features:**
+- Resync button fetches theme hierarchy from Notion API and updates Convex
+- Delete with confirmation dialog showing list of affected projects
+- Theme tree with MainTheme → MiniTheme → Questions hierarchy
+- Stats display (main themes, mini themes, questions, year range)
+
+### Sprint 13.3: Theme Pages List UI ✅ Completed
+
+**Goal:** Build theme pages list with add/sync/delete capabilities
+
+**Completed Tasks:**
+- [x] 13.3.1: Created `components/theme-page-card.tsx` - Card component for theme page display
+- [x] 13.3.2: Created `components/add-theme-page-dialog.tsx` - Dialog for adding theme pages from Notion
+- [x] 13.3.3: Created `app/api/notion/check-duplicate/route.ts` - API for duplicate detection
+- [x] 13.3.4: Updated `components/themes-content.tsx` - Integrated new components
+
+**Files Created:**
+- `components/theme-page-card.tsx` - Card with title, stats, last synced time, click to navigate
+- `components/add-theme-page-dialog.tsx` - Multi-step flow: search → parsing → confirm → save
+- `app/api/notion/check-duplicate/route.ts` - Checks if Notion page already exists as theme page
+
+**Key Features:**
+- Theme page cards show title, stats (main themes, questions), last synced time
+- Add theme page dialog with Notion page search and duplicate prevention
+- Multi-step flow with parsing preview before saving
+- Cards link to theme detail page
 
 ---
 

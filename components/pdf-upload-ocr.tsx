@@ -2,12 +2,12 @@
 
 import { FileText, Sparkles } from "lucide-react";
 import { useCallback, useState } from "react";
-import type { UploadResponse } from "@/app/api/upload/route";
 import { OcrViewer } from "@/components/ocr-viewer";
 import { ProcessingStatus } from "@/components/processing-status";
 import { Button } from "@/components/ui/button";
 import { UploadZone } from "@/components/upload-zone";
 import type { OcrJobResults } from "@/types";
+import type { UploadResponse } from "@/types/upload";
 
 interface PdfUploadOcrProps {
 	/** Project ID for organizing uploads */

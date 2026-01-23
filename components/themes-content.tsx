@@ -1,42 +1,37 @@
 "use client";
 
-import { AlertCircle, BookOpen, RefreshCw } from "lucide-react";
+import { useQuery } from "convex/react";
+import { BookOpen, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { useSettings } from "@/lib/hooks/use-settings";
-import type { MainTheme } from "@/types";
-import { NotionPageSearch } from "./notion-page-search";
-import { ThemeTree } from "./theme-tree";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Card } from "./ui/card";
-import { ErrorMessage } from "./ui/error-message";
-import { LoadingSpinner } from "./ui/loading-spinner";
+import { useEffect, useState } from "react";
+import { AddThemePageDialog } from "@/components/add-theme-page-dialog";
+import { ThemePageCard } from "@/components/theme-page-card";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { api } from "@/convex/_generated/api";
 
-interface ThemeStats {
-	totalMainThemes: number;
-	totalMiniThemes: number;
-	totalQuestions: number;
-	yearsRange: { min: number; max: number } | null;
-}
-
-interface ThemesData {
-	themes: MainTheme[];
-	pageTitle: string;
-	parsedAt: string;
-	stats: ThemeStats;
+interface ThemePage {
+	_id: string;
+	id: string;
+	notionPageId: string;
+	title: string;
+	themes: unknown[];
+	stats: {
+		mainThemes: number;
+		miniThemes: number;
+		questions: number;
+		yearRange?: { min: number; max: number };
+	};
+	lastSyncedAt: string;
+	createdAt: string;
 }
 
 /**
  * Main content component for the Themes page.
- * Handles Notion connection check, theme page selection, and data fetching.
+ * Lists all saved theme pages from Convex.
  */
 export function ThemesContent() {
-	const { settings, isHydrated, hasThemePage, updateSettings } = useSettings();
-
-	const [themesData, setThemesData] = useState<ThemesData | null>(null);
-	const [isLoading, setIsLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const themePages = useQuery(api.themePages.list) as ThemePage[] | undefined;
 	const [isCheckingConnection, setIsCheckingConnection] = useState(true);
 	const [isConnected, setIsConnected] = useState(false);
 
@@ -57,81 +52,11 @@ export function ThemesContent() {
 		checkConnection();
 	}, []);
 
-	/**
-	 * Fetches themes from the API.
-	 */
-	const fetchThemes = useCallback(async () => {
-		if (!settings.themePageId) {
-			return;
-		}
-
-		setIsLoading(true);
-		setError(null);
-
-		try {
-			const response = await fetch("/api/themes", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					pageId: settings.themePageId,
-				}),
-			});
-
-			if (!response.ok) {
-				const data = (await response.json()) as { error?: string };
-				throw new Error(data.error ?? "Failed to fetch themes");
-			}
-
-			const data = (await response.json()) as ThemesData;
-			setThemesData(data);
-
-			// Update page title in settings if changed
-			if (data.pageTitle !== settings.themePageTitle) {
-				updateSettings({ themePageTitle: data.pageTitle });
-			}
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to fetch themes");
-		} finally {
-			setIsLoading(false);
-		}
-	}, [settings.themePageId, settings.themePageTitle, updateSettings]);
-
-	// Fetch themes when page ID changes
-	useEffect(() => {
-		if (isHydrated && isConnected && settings.themePageId) {
-			fetchThemes();
-		}
-	}, [isHydrated, isConnected, settings.themePageId, fetchThemes]);
-
-	/**
-	 * Handles theme page selection from search.
-	 */
-	const handlePageSelect = useCallback(
-		(pageId: string, pageTitle: string) => {
-			updateSettings({
-				themePageId: pageId,
-				themePageTitle: pageTitle,
-			});
-		},
-		[updateSettings]
-	);
-
-	/**
-	 * Clears the selected theme page.
-	 */
-	const handleClearPage = useCallback(() => {
-		updateSettings({
-			themePageId: undefined,
-			themePageTitle: undefined,
-		});
-		setThemesData(null);
-	}, [updateSettings]);
-
-	// Show loading during hydration or connection check
-	if (!isHydrated || isCheckingConnection) {
+	// Show loading during connection check
+	if (isCheckingConnection || themePages === undefined) {
 		return (
 			<div className="flex items-center justify-center py-12">
-				<LoadingSpinner />
+				<Loader2 className="size-8 animate-spin text-muted-foreground" />
 			</div>
 		);
 	}
@@ -141,89 +66,43 @@ export function ThemesContent() {
 		return <NotConnectedState />;
 	}
 
-	// Show page selector if no theme page selected
-	if (!hasThemePage) {
-		return <PageSelectorState onSelect={handlePageSelect} />;
+	// Show empty state if no theme pages
+	if (themePages.length === 0) {
+		return <EmptyState />;
 	}
 
 	return (
 		<div className="space-y-6">
-			{/* Header with page info and actions */}
+			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div>
-					<h2 className="font-semibold text-2xl">Themes</h2>
+					<h2 className="font-semibold text-2xl">Theme Pages</h2>
 					<p className="text-muted-foreground">
-						{settings.themePageTitle ?? "Loading..."}
+						Manage your saved Notion theme pages
 					</p>
 				</div>
-				<div className="flex items-center gap-2">
-					<Button onClick={handleClearPage} size="sm" variant="outline">
-						Change Page
-					</Button>
-					<Button
-						disabled={isLoading}
-						onClick={fetchThemes}
-						size="sm"
-						variant="outline"
-					>
-						{isLoading ? (
-							<LoadingSpinner className="size-4" />
-						) : (
-							<RefreshCw className="size-4" />
-						)}
-						{isLoading ? "Refreshing..." : "Refresh"}
-					</Button>
-				</div>
+				<AddThemePageDialog
+					trigger={
+						<Button>
+							<Plus className="mr-2 size-4" />
+							Add Theme Page
+						</Button>
+					}
+				/>
 			</div>
 
-			{/* Error state */}
-			{error && (
-				<ErrorMessage
-					message={error}
-					retry={fetchThemes}
-					title="Failed to load themes"
-				/>
-			)}
-
-			{/* Loading state */}
-			{isLoading && !themesData && (
-				<div className="flex flex-col items-center justify-center py-12">
-					<LoadingSpinner className="size-8" />
-					<p className="mt-4 text-muted-foreground">Parsing themes...</p>
-				</div>
-			)}
-
-			{/* Theme data */}
-			{themesData && (
-				<>
-					{/* Stats */}
-					<div className="flex flex-wrap gap-2">
-						<Badge variant="secondary">
-							{themesData.stats.totalMainThemes} main themes
-						</Badge>
-						<Badge variant="secondary">
-							{themesData.stats.totalMiniThemes} mini themes
-						</Badge>
-						<Badge variant="secondary">
-							{themesData.stats.totalQuestions} questions
-						</Badge>
-						{themesData.stats.yearsRange && (
-							<Badge variant="outline">
-								{themesData.stats.yearsRange.min} -{" "}
-								{themesData.stats.yearsRange.max}
-							</Badge>
-						)}
-					</div>
-
-					{/* Theme tree */}
-					<ThemeTree themes={themesData.themes} />
-
-					{/* Last updated */}
-					<p className="text-muted-foreground text-xs">
-						Last updated: {new Date(themesData.parsedAt).toLocaleString()}
-					</p>
-				</>
-			)}
+			{/* Theme Pages List */}
+			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{themePages.map((themePage) => (
+					<ThemePageCard
+						id={themePage._id}
+						key={themePage._id}
+						lastSyncedAt={themePage.lastSyncedAt}
+						stats={themePage.stats}
+						title={themePage.title}
+					/>
+				))}
+			</div>
 		</div>
 	);
 }
@@ -235,9 +114,9 @@ function NotConnectedState() {
 	return (
 		<div className="space-y-6">
 			<div>
-				<h2 className="font-semibold text-2xl">Themes</h2>
+				<h2 className="font-semibold text-2xl">Theme Pages</h2>
 				<p className="text-muted-foreground">
-					Browse and manage essay themes from Notion
+					Manage your saved Notion theme pages
 				</p>
 			</div>
 
@@ -247,8 +126,8 @@ function NotConnectedState() {
 				</div>
 				<h3 className="font-medium text-lg">Connect Notion First</h3>
 				<p className="mt-1 max-w-sm text-muted-foreground text-sm">
-					Connect your Notion account to view your essay themes. Set
-					NOTION_API_KEY in .env.local or configure in Settings.
+					Connect your Notion account to manage theme pages. Set NOTION_API_KEY
+					in your .env.local file.
 				</p>
 				<Link href="/settings">
 					<Button className="mt-4">Go to Settings</Button>
@@ -258,56 +137,46 @@ function NotConnectedState() {
 	);
 }
 
-interface PageSelectorStateProps {
-	onSelect: (pageId: string, pageTitle: string) => void;
-}
-
 /**
- * State shown when Notion is connected but no theme page selected.
+ * State shown when no theme pages exist.
  */
-function PageSelectorState({ onSelect }: PageSelectorStateProps) {
-	const [searchError, setSearchError] = useState<string | null>(null);
-
+function EmptyState() {
 	return (
 		<div className="space-y-6">
-			<div>
-				<h2 className="font-semibold text-2xl">Themes</h2>
-				<p className="text-muted-foreground">
-					Select a Notion page containing your essay themes
-				</p>
-			</div>
-
-			<Card className="p-6">
-				<div className="space-y-4">
-					<div className="flex items-center gap-2">
-						<AlertCircle className="size-5 text-amber-500" />
-						<h3 className="font-medium">Select Theme Page</h3>
-					</div>
-					<p className="text-muted-foreground text-sm">
-						Search for and select the Notion page that contains your essay
-						themes. The page should have a hierarchical structure with main
-						themes, mini themes, and questions.
-					</p>
-
-					{searchError && (
-						<p className="text-destructive text-sm">{searchError}</p>
-					)}
-
-					<NotionPageSearch
-						onError={setSearchError}
-						onSelect={(pageId, pageTitle) => {
-							setSearchError(null);
-							onSelect(pageId, pageTitle);
-						}}
-						placeholder="Search for your themes page..."
-					/>
-
-					<p className="text-muted-foreground text-xs">
-						Tip: Your themes page should have toggles or headings for main
-						themes, with nested mini themes and questions in "YYYY: Question
-						text" format.
+			<div className="flex items-center justify-between">
+				<div>
+					<h2 className="font-semibold text-2xl">Theme Pages</h2>
+					<p className="text-muted-foreground">
+						Manage your saved Notion theme pages
 					</p>
 				</div>
+				<AddThemePageDialog
+					trigger={
+						<Button>
+							<Plus className="mr-2 size-4" />
+							Add Theme Page
+						</Button>
+					}
+				/>
+			</div>
+
+			<Card className="flex flex-col items-center justify-center p-12 text-center">
+				<div className="mb-4 rounded-full bg-muted p-4">
+					<BookOpen className="size-8 text-muted-foreground" />
+				</div>
+				<h3 className="font-medium text-lg">No Theme Pages Yet</h3>
+				<p className="mt-1 max-w-sm text-muted-foreground text-sm">
+					Add a theme page from your Notion workspace to get started. Theme
+					pages contain the hierarchy of topics for classifying your content.
+				</p>
+				<AddThemePageDialog
+					trigger={
+						<Button className="mt-4" variant="outline">
+							<Plus className="size-4" />
+							Add Your First Theme Page
+						</Button>
+					}
+				/>
 			</Card>
 		</div>
 	);

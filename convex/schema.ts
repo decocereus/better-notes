@@ -2,12 +2,36 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+	themePages: defineTable({
+		notionPageId: v.string(), // Notion page UUID
+		title: v.string(), // From Notion page title
+		themes: v.array(v.any()), // MainTheme[] - full parsed hierarchy
+		stats: v.object({
+			mainThemes: v.number(),
+			miniThemes: v.number(),
+			questions: v.number(),
+			yearRange: v.optional(
+				v.object({
+					min: v.number(),
+					max: v.number(),
+				})
+			),
+		}),
+		lastSyncedAt: v.string(), // ISO timestamp of last Notion fetch
+		createdAt: v.string(),
+	})
+		.index("by_notion_page", ["notionPageId"]) // Prevent duplicates
+		.index("by_created", ["createdAt"]), // Sort by date added
+
 	projects: defineTable({
 		name: v.string(),
 		description: v.optional(v.string()),
+		themePageId: v.id("themePages"), // Required reference to theme page
 		createdAt: v.string(),
 		updatedAt: v.string(),
-	}).index("by_updated", ["updatedAt"]),
+	})
+		.index("by_updated", ["updatedAt"])
+		.index("by_theme_page", ["themePageId"]), // Find projects using a theme
 
 	contentSources: defineTable({
 		projectId: v.id("projects"),

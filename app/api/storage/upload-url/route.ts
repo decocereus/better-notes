@@ -5,6 +5,11 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import {
+	ALLOWED_MIME_TYPES,
+	formatFileSize,
+	MAX_FILE_SIZE_BYTES,
+} from "@/lib/constants/upload";
+import {
 	generateProjectFileKey,
 	getUploadUrl,
 	validateR2Config,
@@ -23,18 +28,6 @@ interface UploadUrlRequest {
 	/** Optional file size in bytes (for validation) */
 	fileSize?: number;
 }
-
-/** Maximum file size: 500MB */
-const MAX_FILE_SIZE = 500 * 1024 * 1024;
-
-/** Allowed MIME types for upload */
-const ALLOWED_MIME_TYPES = [
-	"application/pdf",
-	"image/png",
-	"image/jpeg",
-	"image/webp",
-	"image/gif",
-];
 
 /**
  * POST /api/storage/upload-url
@@ -67,7 +60,11 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Validate content type
-		if (!ALLOWED_MIME_TYPES.includes(contentType)) {
+		if (
+			!ALLOWED_MIME_TYPES.includes(
+				contentType as (typeof ALLOWED_MIME_TYPES)[number]
+			)
+		) {
 			return NextResponse.json(
 				{
 					error: "Invalid file type",
@@ -78,12 +75,12 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Validate file size if provided
-		if (fileSize && fileSize > MAX_FILE_SIZE) {
+		if (fileSize && fileSize > MAX_FILE_SIZE_BYTES) {
 			return NextResponse.json(
 				{
 					error: "File too large",
-					maxSize: MAX_FILE_SIZE,
-					maxSizeFormatted: "500MB",
+					maxSize: MAX_FILE_SIZE_BYTES,
+					maxSizeFormatted: formatFileSize(MAX_FILE_SIZE_BYTES),
 				},
 				{ status: 400 }
 			);

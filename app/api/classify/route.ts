@@ -6,7 +6,10 @@
  * GET: Get classification results
  */
 
+import { ConvexHttpClient } from "convex/browser";
 import { type NextRequest, NextResponse } from "next/server";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { validateAIConfig } from "@/lib/ai";
 import {
 	classifyContentBatch,
@@ -20,9 +23,6 @@ import {
 	analyzeCrossThemeContent,
 	updateMultiUseFlags,
 } from "@/lib/classification/cross-theme";
-import { NotionClient } from "@/lib/notion/client";
-import { getNotionApiKey } from "@/lib/notion/config";
-import { parseThemePage } from "@/lib/notion/theme-parser";
 import {
 	completeJob,
 	createJob,
@@ -40,10 +40,8 @@ import type { MainTheme } from "@/types/theme";
 interface ClassifyRequestBody {
 	/** Extraction job ID to get content from */
 	extractionJobId: string;
-	/** Notion page ID containing themes */
+	/** Convex theme page ID (from themePages table) */
 	themePageId: string;
-	/** Optional Notion API key (uses env var if not provided) */
-	apiKey?: string;
 }
 
 /**
@@ -61,6 +59,17 @@ interface ClassificationJobResults {
 		crossTheme: ReturnType<typeof analyzeCrossThemeContent>["stats"];
 	};
 	processedAt: string;
+}
+
+/**
+ * Gets the Convex HTTP client.
+ */
+function getConvexClient(): ConvexHttpClient {
+	const url = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!url) {
+		throw new Error("NEXT_PUBLIC_CONVEX_URL environment variable not set");
+	}
+	return new ConvexHttpClient(url);
 }
 
 /**
@@ -86,6 +95,13 @@ function validateConfigurations(): NextResponse | null {
 		);
 	}
 
+	if (!process.env.NEXT_PUBLIC_CONVEX_URL) {
+		return NextResponse.json(
+			{ error: "Convex not configured" },
+			{ status: 503 }
+		);
+	}
+
 	return null;
 }
 
@@ -96,10 +112,8 @@ function validateRequestBody(body: ClassifyRequestBody): {
 	error: NextResponse | null;
 	extractionJobId: string;
 	themePageId: string;
-	apiKey: string;
 } {
 	const { extractionJobId, themePageId } = body;
-	const apiKey = getNotionApiKey(body.apiKey);
 
 	if (!extractionJobId) {
 		return {
@@ -109,7 +123,6 @@ function validateRequestBody(body: ClassifyRequestBody): {
 			),
 			extractionJobId: "",
 			themePageId: "",
-			apiKey: "",
 		};
 	}
 
@@ -121,26 +134,10 @@ function validateRequestBody(body: ClassifyRequestBody): {
 			),
 			extractionJobId,
 			themePageId: "",
-			apiKey: "",
 		};
 	}
 
-	if (!apiKey) {
-		return {
-			error: NextResponse.json(
-				{
-					error:
-						"No Notion API key configured. Set NOTION_API_KEY environment variable or provide apiKey in request.",
-				},
-				{ status: 400 }
-			),
-			extractionJobId,
-			themePageId,
-			apiKey: "",
-		};
-	}
-
-	return { error: null, extractionJobId, themePageId, apiKey };
+	return { error: null, extractionJobId, themePageId };
 }
 
 /**
@@ -168,27 +165,39 @@ async function loadExtractionResults(
 }
 
 /**
- * Loads themes from Notion.
+ * Loads themes from Convex database.
  */
-async function loadThemes(
-	apiKey: string,
+async function loadThemesFromConvex(
 	themePageId: string
 ): Promise<{ themes: MainTheme[] | null; error: NextResponse | null }> {
 	try {
-		const client = new NotionClient(apiKey);
-		const themeData = await parseThemePage(client, themePageId);
+		const convex = getConvexClient();
+		const themePage = await convex.query(api.themePages.get, {
+			id: themePageId as Id<"themePages">,
+		});
 
-		if (themeData.themes.length === 0) {
+		if (!themePage) {
 			return {
 				themes: null,
 				error: NextResponse.json(
-					{ error: "No themes found in the specified page" },
+					{ error: "Theme page not found" },
+					{ status: 404 }
+				),
+			};
+		}
+
+		const themes = themePage.themes as MainTheme[];
+		if (themes.length === 0) {
+			return {
+				themes: null,
+				error: NextResponse.json(
+					{ error: "No themes found in the theme page" },
 					{ status: 400 }
 				),
 			};
 		}
 
-		return { themes: themeData.themes, error: null };
+		return { themes, error: null };
 	} catch (error) {
 		const message =
 			error instanceof Error ? error.message : "Failed to load themes";
@@ -218,7 +227,7 @@ export async function POST(request: NextRequest) {
 			return validation.error;
 		}
 
-		const { extractionJobId, themePageId, apiKey } = validation;
+		const { extractionJobId, themePageId } = validation;
 
 		// Verify extraction job is completed
 		const extractionJob = await getJob(extractionJobId);
@@ -253,8 +262,8 @@ export async function POST(request: NextRequest) {
 		}
 		const extractedContent = extractionResult.content;
 
-		// Load themes from Notion
-		const themesResult = await loadThemes(apiKey, themePageId);
+		// Load themes from Convex
+		const themesResult = await loadThemesFromConvex(themePageId);
 		if (themesResult.error || !themesResult.themes) {
 			return (
 				themesResult.error ??
