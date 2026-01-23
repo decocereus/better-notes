@@ -599,3 +599,17 @@ const setIsOpen = isControlled ? onOpenChange! : setInternalOpen;
 **Problem:** Lint error "noNamespaceImport" when using `import * as React from "react"`
 **Solution:** Use named imports: `import { forwardRef, type HTMLAttributes } from "react"`
 **Lesson:** Even for patterns that traditionally use namespace imports (like forwardRef components), use named imports to satisfy the linter and improve tree-shaking
+
+### 2026-01-23 - OpenRouter 5MB File Size Limit
+
+**Context:** Sending 190MB PDF directly to Gemini via OpenRouter for OCR
+**Problem:** OpenRouter downloads files before forwarding to the underlying model, enforcing a 5MB file size limit: "File is too large: 199587559 bytes. Max size is 5242880 bytes"
+**Solution:** Use `@ai-sdk/google` directly with `GOOGLE_GENERATIVE_AI_API_KEY` to bypass OpenRouter for large file operations. Gemini natively supports files up to 2GB via signed URLs.
+**Lesson:** When working with large files (>5MB) that need to be sent to LLMs, use the provider's SDK directly instead of going through OpenRouter. Create a separate function that uses the direct provider for these specific use cases.
+
+### 2026-01-23 - pdf.js Worker Configuration in Node.js
+
+**Context:** Using pdf.js for PDF processing in Next.js API routes
+**Problem:** Multiple errors when configuring pdf.js worker on server-side: "No GlobalWorkerOptions.workerSrc specified", "Cannot find module pdf.worker.mjs", "Cannot read properties of undefined (reading 'setup')"
+**Solution:** For handwritten PDFs that need OCR anyway, skip pdf.js entirely and send the PDF directly to an LLM with vision capabilities. Gemini can process PDFs directly via URL without needing pdf.js rendering.
+**Lesson:** When pdf.js is only being used as a preprocessing step for LLM OCR, consider whether the LLM can handle the PDF directly. Modern LLMs like Gemini support PDFs natively, avoiding complex pdf.js worker configuration issues.

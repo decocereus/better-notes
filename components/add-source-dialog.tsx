@@ -216,6 +216,7 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 						</div>
 					) : (
 						<UploadZone
+							autoProcess
 							disabled={isLoading}
 							multiple
 							onUploadComplete={handleUploadComplete}

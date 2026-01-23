@@ -10,6 +10,34 @@ Track completed work, current status, and next steps.
 
 ---
 
+## Bug Fix: OpenRouter 5MB File Limit (2026-01-23) - Complete
+
+**Problem:** OCR pipeline failed for large PDFs (190MB) because OpenRouter downloads files before forwarding them to the underlying model, enforcing a 5MB file size limit.
+
+**Solution:** Use `@ai-sdk/google` directly for PDF OCR to bypass OpenRouter. Gemini supports files up to 2GB via signed URLs.
+
+**Files Modified:**
+- `lib/env.ts` - Added `GOOGLE_GENERATIVE_AI_API_KEY` environment variable
+- `lib/ai/ocr.ts` - Added `getGoogleModel()` helper that uses `@ai-sdk/google` directly, updated `performDirectPdfOcr` to use Google AI instead of OpenRouter
+
+**Key Change:**
+```typescript
+// Before (fails for files >5MB):
+const model = getModel("OCR");  // Goes through OpenRouter
+
+// After (supports files up to 2GB):
+function getGoogleModel() {
+  const { google } = require("@ai-sdk/google");
+  return google("gemini-2.0-flash");
+}
+const model = getGoogleModel();  // Direct to Google AI
+```
+
+**Setup Required:**
+- Add `GOOGLE_GENERATIVE_AI_API_KEY` to `.env.local`
+
+---
+
 ## Sprint 14 - Global Asset Library & Automated Processing Pipeline (2026-01-23) - Complete
 
 ### Overview

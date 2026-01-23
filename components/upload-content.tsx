@@ -114,6 +114,7 @@ export function UploadContent() {
 			{/* Upload Zone */}
 			<Card className="p-6">
 				<UploadZone
+					autoProcess
 					multiple
 					onUploadComplete={handleUploadComplete}
 					onUploadError={handleUploadError}

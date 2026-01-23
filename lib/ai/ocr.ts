@@ -2,6 +2,13 @@
  * OCR Service
  * Performs OCR on PDF pages using LLM vision capabilities.
  * Optimized for handwritten UPSC essay content.
+ *
+ * Supports two modes:
+ * 1. Direct PDF OCR - Pass entire PDF to Gemini via @ai-sdk/google (for large files)
+ * 2. Page-by-page OCR - Render pages as images (fallback for problematic PDFs)
+ *
+ * Uses Google AI directly for large PDF OCR to bypass OpenRouter's 5MB limit.
+ * Gemini supports files up to 2GB via URL.
  */
 
 import { generateText } from "ai";
@@ -174,5 +181,120 @@ export function combineOcrResults(results: OcrPageResult[]): {
 		totalWords,
 		averageConfidence,
 		pageCount: sortedResults.length,
+	};
+}
+
+/**
+ * OCR prompt for direct PDF processing.
+ */
+const PDF_OCR_SYSTEM_PROMPT = `You are an expert OCR system specialized in reading handwritten text from UPSC essay answer sheets.
+
+Your task is to accurately transcribe ALL handwritten content from this PDF while:
+1. Processing each page in order
+2. Preserving the original paragraph structure
+3. Maintaining any bullet points or numbered lists
+4. Keeping quoted text and citations intact
+5. Preserving emphasis (underlined text → **bold**)
+6. Handling corrections and strikethroughs appropriately
+
+Guidelines:
+- Process every page of the PDF
+- If a word is unclear, make your best interpretation based on context
+- Mark completely illegible sections with [illegible]
+- Preserve the writer's intent even if grammar/spelling has errors
+- Maintain the flow and structure of essay arguments
+- Separate different essays or sections clearly with "---"
+
+Output ONLY the transcribed text, nothing else.`;
+
+/**
+ * Result from direct PDF OCR.
+ */
+export interface DirectPdfOcrResult {
+	/** Full transcribed text */
+	text: string;
+	/** Word count */
+	wordCount: number;
+	/** Confidence estimate (0-1) */
+	confidence: number;
+	/** Processing time in milliseconds */
+	processingTimeMs: number;
+}
+
+/**
+ * Gets the Google AI model for direct PDF OCR.
+ * Uses @ai-sdk/google to bypass OpenRouter's 5MB file limit.
+ * Gemini supports files up to 2GB via URL.
+ */
+function getGoogleModel() {
+	// Dynamic import to avoid loading @ai-sdk/google when not needed
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const { google } =
+		require("@ai-sdk/google") as typeof import("@ai-sdk/google");
+	return google("gemini-2.0-flash");
+}
+
+/**
+ * Performs OCR on an entire PDF file directly.
+ * This is simpler and more efficient than page-by-page processing.
+ *
+ * Uses Google AI directly (not OpenRouter) because:
+ * - OpenRouter has a 5MB file size limit (downloads files before forwarding)
+ * - Gemini supports files up to 2GB via signed URLs
+ *
+ * Requires GOOGLE_GENERATIVE_AI_API_KEY environment variable.
+ *
+ * @param pdfUrl - URL to the PDF file (can be a signed R2 URL)
+ * @param options - OCR options
+ * @returns OCR result with full text
+ */
+export async function performDirectPdfOcr(
+	pdfUrl: string,
+	options: OcrOptions = {}
+): Promise<DirectPdfOcrResult> {
+	const { contentHint } = options;
+
+	// Use Google AI directly to bypass OpenRouter's 5MB limit
+	const model = getGoogleModel();
+
+	let userPrompt =
+		"Transcribe all the handwritten text from this PDF accurately. Process every page.";
+	if (contentHint) {
+		userPrompt += ` Context: ${contentHint}`;
+	}
+
+	const startTime = Date.now();
+
+	const result = await generateText({
+		model,
+		system: PDF_OCR_SYSTEM_PROMPT,
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: userPrompt },
+					{
+						type: "file",
+						data: pdfUrl,
+						mediaType: "application/pdf",
+					},
+				],
+			},
+		],
+	});
+
+	const text = result.text.trim();
+	const wordCount = text.split(WORD_SPLIT_REGEX).filter(Boolean).length;
+	const processingTime = Date.now() - startTime;
+
+	// Calculate confidence based on presence of [illegible] markers
+	const illegibleCount = (text.match(/\[illegible\]/gi) || []).length;
+	const confidence = Math.max(0.5, 1 - illegibleCount * 0.05);
+
+	return {
+		text,
+		wordCount,
+		confidence,
+		processingTimeMs: processingTime,
 	};
 }

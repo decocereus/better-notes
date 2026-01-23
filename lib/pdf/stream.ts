@@ -15,6 +15,11 @@ import { getReadUrl } from "@/lib/storage";
 let pdfjsModule: typeof import("pdfjs-dist") | null = null;
 
 /**
+ * Whether we're running on the server (Node.js).
+ */
+const isServer = typeof window === "undefined";
+
+/**
  * Lazily loads the pdf.js module.
  * Uses the legacy build on the server to avoid DOMMatrix issues.
  */
@@ -25,10 +30,12 @@ async function getPdfjs(): Promise<typeof import("pdfjs-dist")> {
 
 	// Use legacy build for Node.js (server-side)
 	// The legacy build doesn't use DOMMatrix and other browser-only APIs
-	if (typeof window === "undefined") {
+	if (isServer) {
 		const legacyPdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-		// Disable worker for server-side processing
-		legacyPdfjs.GlobalWorkerOptions.workerSrc = "";
+		// Disable worker by setting workerSrc to empty data URL
+		// This prevents pdf.js from trying to load a worker file
+		legacyPdfjs.GlobalWorkerOptions.workerSrc =
+			"data:application/javascript,// disabled";
 		pdfjsModule = legacyPdfjs as unknown as typeof import("pdfjs-dist");
 	} else {
 		// Use standard build for browser
@@ -129,12 +136,15 @@ export async function loadPdfFromR2(
 	});
 
 	// Load the PDF using pdf.js
+	// For server-side, disable streaming but allow eval-based fake worker
 	const loadingTask = pdfjs.getDocument({
 		url: urlResult.readUrl,
 		password,
 		// Disable streaming for server-side processing
-		disableAutoFetch: typeof window === "undefined",
-		disableStream: typeof window === "undefined",
+		disableAutoFetch: isServer,
+		disableStream: isServer,
+		// Allow eval-based inline worker (required for Node.js)
+		isEvalSupported: true,
 	});
 
 	const document = await loadingTask.promise;

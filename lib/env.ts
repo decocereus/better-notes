@@ -6,6 +6,8 @@
 export const env = {
 	NOTION_API_KEY: process.env.NOTION_API_KEY ?? "",
 	OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY ?? "",
+	// Google AI for direct Gemini access (bypasses OpenRouter's 5MB file limit)
+	GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
 	// Cloudflare R2 Storage
 	R2_ENDPOINT: process.env.R2_ENDPOINT ?? "",
 	R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "",
