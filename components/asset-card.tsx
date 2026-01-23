@@ -161,12 +161,25 @@ export function AssetCard({
 				)}
 
 				{asset.lastError && (
-					<p
-						className="truncate text-destructive text-xs"
-						title={asset.lastError}
-					>
-						Error: {asset.lastError}
-					</p>
+					<div className="space-y-2">
+						<p
+							className="truncate text-destructive text-xs"
+							title={asset.lastError}
+						>
+							Error: {asset.lastError}
+						</p>
+						{canProcess && onProcess && (
+							<Button
+								className="h-7 text-xs"
+								onClick={onProcess}
+								size="sm"
+								variant="outline"
+							>
+								<Play className="mr-1 size-3" />
+								Retry Processing
+							</Button>
+						)}
+					</div>
 				)}
 			</CardContent>
 		</Card>

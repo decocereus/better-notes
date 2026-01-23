@@ -613,3 +613,55 @@ const setIsOpen = isControlled ? onOpenChange! : setInternalOpen;
 **Problem:** Multiple errors when configuring pdf.js worker on server-side: "No GlobalWorkerOptions.workerSrc specified", "Cannot find module pdf.worker.mjs", "Cannot read properties of undefined (reading 'setup')"
 **Solution:** For handwritten PDFs that need OCR anyway, skip pdf.js entirely and send the PDF directly to an LLM with vision capabilities. Gemini can process PDFs directly via URL without needing pdf.js rendering.
 **Lesson:** When pdf.js is only being used as a preprocessing step for LLM OCR, consider whether the LLM can handle the PDF directly. Modern LLMs like Gemini support PDFs natively, avoiding complex pdf.js worker configuration issues.
+
+### 2026-01-23 - @ai-sdk/google Requires Buffer for PDF Files
+
+**Context:** Bypassing OpenRouter's 5MB limit by using `@ai-sdk/google` directly for large PDF OCR
+**Problem:** Passing a URL string to Gemini via @ai-sdk/google resulted in "Request contains an invalid argument" (400) error. Tried `new URL(pdfUrl)` - also didn't work.
+**Solution:** Download the PDF to a Buffer and pass it with `type: "file"`:
+```typescript
+const pdfResponse = await fetch(pdfUrl);
+const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+
+const result = await generateText({
+  model: google("gemini-2.5-flash"),
+  messages: [{
+    role: "user",
+    content: [
+      { type: "text", text: prompt },
+      { type: "file", data: pdfBuffer, mediaType: "application/pdf" },
+    ],
+  }],
+});
+```
+**Lesson:** For `@ai-sdk/google`, files must be passed as Buffer data with explicit mediaType, not as URLs. The AI SDK file content part supports `type: "file"` with `data` (Buffer) and `mediaType` fields.
+
+### 2026-01-23 - Gemini Model Names
+
+**Context:** Using @ai-sdk/google to access Gemini models directly
+**Problem:** "models/gemini-1.5-flash is not found" (404) error when trying to use `gemini-1.5-flash` model name
+**Solution:** Use `gemini-2.5-flash` - the latest model name that works with @ai-sdk/google
+**Lesson:** Model names change frequently. When getting "model not found" errors, check the latest available model names for the provider. Gemini 2.5 Flash is the current recommended model for fast processing.
+
+### 2026-01-23 - @ai-sdk/google vs @google/genai for File API URIs
+
+**Context:** Using Google File API for large PDF OCR (190MB). Uploaded file successfully to File API, got a URI like `https://generativelanguage.googleapis.com/v1beta/files/xyz`
+**Problem:** Passing the File API URI to `@ai-sdk/google` `generateText` with `type: "file"` and `data: new URL(fileUri)` resulted in "INVALID_ARGUMENT" (400) error
+**Solution:** Use `@google/genai` directly with `createPartFromUri` instead of `@ai-sdk/google`:
+```typescript
+const { GoogleGenAI, createPartFromUri } = require("@google/genai");
+const genai = new GoogleGenAI({ apiKey });
+
+const response = await genai.models.generateContent({
+  model: "gemini-2.5-flash",
+  config: { systemInstruction: "..." },
+  contents: [{
+    role: "user",
+    parts: [
+      createPartFromUri(file.uri, "application/pdf"),
+      { text: "Your prompt" },
+    ],
+  }],
+});
+```
+**Lesson:** `@ai-sdk/google` only supports Buffer data for files - it cannot reference Google File API URIs. For large files uploaded via File API, use `@google/genai` directly with `createPartFromUri(uri, mimeType)` to reference the uploaded file.

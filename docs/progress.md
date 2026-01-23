@@ -14,27 +14,44 @@ Track completed work, current status, and next steps.
 
 **Problem:** OCR pipeline failed for large PDFs (190MB) because OpenRouter downloads files before forwarding them to the underlying model, enforcing a 5MB file size limit.
 
-**Solution:** Use `@ai-sdk/google` directly for PDF OCR to bypass OpenRouter. Gemini supports files up to 2GB via signed URLs.
+**Solution:** Use `@ai-sdk/google` directly for PDF OCR to bypass OpenRouter. Download PDF to buffer and pass directly to Gemini 2.5 Flash.
 
 **Files Modified:**
 - `lib/env.ts` - Added `GOOGLE_GENERATIVE_AI_API_KEY` environment variable
-- `lib/ai/ocr.ts` - Added `getGoogleModel()` helper that uses `@ai-sdk/google` directly, updated `performDirectPdfOcr` to use Google AI instead of OpenRouter
+- `lib/ai/ocr.ts` - Rewrote `performDirectPdfOcr` to download PDF and pass as buffer to Gemini
+- `components/asset-card.tsx` - Added "Retry Processing" button for failed assets
 
 **Key Change:**
 ```typescript
 // Before (fails for files >5MB):
 const model = getModel("OCR");  // Goes through OpenRouter
 
-// After (supports files up to 2GB):
-function getGoogleModel() {
-  const { google } = require("@ai-sdk/google");
-  return google("gemini-2.0-flash");
-}
-const model = getGoogleModel();  // Direct to Google AI
+// After (supports large files):
+const { google } = require("@ai-sdk/google");
+const model = google("gemini-2.5-flash");
+
+// Download PDF and pass as buffer
+const pdfResponse = await fetch(pdfUrl);
+const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+
+const result = await generateText({
+  model,
+  system: PDF_OCR_SYSTEM_PROMPT,
+  messages: [{
+    role: "user",
+    content: [
+      { type: "text", text: userPrompt },
+      { type: "file", data: pdfBuffer, mediaType: "application/pdf" },
+    ],
+  }],
+});
 ```
 
 **Setup Required:**
 - Add `GOOGLE_GENERATIVE_AI_API_KEY` to `.env.local`
+
+**UI Enhancement:**
+- Added retry button on asset card for failed assets - displays below error message with "Retry Processing" label
 
 ---
 

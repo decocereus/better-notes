@@ -222,25 +222,10 @@ export interface DirectPdfOcrResult {
 }
 
 /**
- * Gets the Google AI model for direct PDF OCR.
- * Uses @ai-sdk/google to bypass OpenRouter's 5MB file limit.
- * Gemini supports files up to 2GB via URL.
- */
-function getGoogleModel() {
-	// Dynamic import to avoid loading @ai-sdk/google when not needed
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	const { google } =
-		require("@ai-sdk/google") as typeof import("@ai-sdk/google");
-	return google("gemini-2.0-flash");
-}
-
-/**
- * Performs OCR on an entire PDF file directly.
- * This is simpler and more efficient than page-by-page processing.
+ * Performs OCR on an entire PDF file directly using Google AI.
  *
- * Uses Google AI directly (not OpenRouter) because:
- * - OpenRouter has a 5MB file size limit (downloads files before forwarding)
- * - Gemini supports files up to 2GB via signed URLs
+ * For large files (>20MB), uploads to Google's File API first, then processes
+ * using @google/genai directly with createPartFromUri.
  *
  * Requires GOOGLE_GENERATIVE_AI_API_KEY environment variable.
  *
@@ -254,8 +239,17 @@ export async function performDirectPdfOcr(
 ): Promise<DirectPdfOcrResult> {
 	const { contentHint } = options;
 
-	// Use Google AI directly to bypass OpenRouter's 5MB limit
-	const model = getGoogleModel();
+	// Dynamic imports to avoid loading at module level
+	const { GoogleGenAI, createPartFromUri } =
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		require("@google/genai") as typeof import("@google/genai");
+
+	const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+	if (!apiKey) {
+		throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set");
+	}
+
+	const genai = new GoogleGenAI({ apiKey });
 
 	let userPrompt =
 		"Transcribe all the handwritten text from this PDF accurately. Process every page.";
@@ -265,31 +259,96 @@ export async function performDirectPdfOcr(
 
 	const startTime = Date.now();
 
-	const result = await generateText({
-		model,
-		system: PDF_OCR_SYSTEM_PROMPT,
-		messages: [
-			{
-				role: "user",
-				content: [
-					{ type: "text", text: userPrompt },
-					{
-						type: "file",
-						data: pdfUrl,
-						mediaType: "application/pdf",
-					},
-				],
-			},
-		],
+	// Download PDF from R2
+	console.log("[OCR] Downloading PDF from R2...");
+	const pdfResponse = await fetch(pdfUrl);
+	if (!pdfResponse.ok) {
+		throw new Error(`Failed to download PDF: ${pdfResponse.status}`);
+	}
+	const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+	const fileSizeMB = pdfBuffer.length / 1024 / 1024;
+	console.log(`[OCR] Downloaded ${fileSizeMB.toFixed(1)}MB`);
+
+	// Upload to Google's File API (required for files >20MB)
+	console.log("[OCR] Uploading to Google File API...");
+	const uploadedFile = await genai.files.upload({
+		file: new Blob([pdfBuffer], { type: "application/pdf" }),
+		config: {
+			mimeType: "application/pdf",
+		},
+	});
+	console.log(`[OCR] Uploaded as ${uploadedFile.name}`);
+
+	// Wait for file to be processed by Google
+	let file = uploadedFile;
+	while (file.state === "PROCESSING") {
+		console.log("[OCR] Waiting for file processing...");
+		await new Promise((resolve) => setTimeout(resolve, 2000));
+		const fileStatus = await genai.files.get({ name: file.name as string });
+		file = fileStatus;
+	}
+
+	if (file.state === "FAILED") {
+		throw new Error("Google File API processing failed");
+	}
+
+	console.log(`[OCR] File ready: ${file.uri}`);
+
+	// Use @google/genai directly with createPartFromUri for File API URIs
+	// @ai-sdk/google doesn't support File API URIs - only Buffer data
+	console.log("[OCR] Sending to Gemini via @google/genai...");
+	console.log("[OCR] Request details:", {
+		model: "gemini-2.5-flash",
+		fileUri: file.uri,
+		promptLength: userPrompt.length,
+		systemPromptLength: PDF_OCR_SYSTEM_PROMPT.length,
 	});
 
-	const text = result.text.trim();
+	let responseText: string;
+	try {
+		const response = await genai.models.generateContent({
+			model: "gemini-2.5-flash",
+			config: {
+				systemInstruction: PDF_OCR_SYSTEM_PROMPT,
+			},
+			contents: [
+				{
+					role: "user",
+					parts: [
+						createPartFromUri(file.uri as string, "application/pdf"),
+						{ text: userPrompt },
+					],
+				},
+			],
+		});
+		responseText = response.text ?? "";
+	} catch (error: unknown) {
+		console.error("[OCR] Full error object:", JSON.stringify(error, null, 2));
+		console.error("[OCR] Error details:", {
+			name: (error as Error).name,
+			message: (error as Error).message,
+			cause: (error as { cause?: unknown }).cause,
+		});
+		throw error;
+	}
+
+	// Clean up uploaded file from Google
+	try {
+		await genai.files.delete({ name: file.name as string });
+		console.log("[OCR] Cleaned up uploaded file");
+	} catch {
+		console.log("[OCR] Failed to clean up file (non-critical)");
+	}
+
+	const text = responseText.trim();
 	const wordCount = text.split(WORD_SPLIT_REGEX).filter(Boolean).length;
 	const processingTime = Date.now() - startTime;
 
 	// Calculate confidence based on presence of [illegible] markers
 	const illegibleCount = (text.match(/\[illegible\]/gi) || []).length;
 	const confidence = Math.max(0.5, 1 - illegibleCount * 0.05);
+
+	console.log(`[OCR] Completed - ${wordCount} words in ${processingTime}ms`);
 
 	return {
 		text,
