@@ -4,12 +4,7 @@
  */
 
 import type { AssetMetadata, ConversionStatus } from "@/types/ocr";
-import {
-	downloadFromR2,
-	getR2FileInfo,
-	listR2Files,
-	uploadToR2,
-} from "./r2-client";
+import { downloadFromR2, getR2FileInfo, listR2Files } from "./r2-client";
 import { getReadUrl } from "./signed-urls";
 
 /**
@@ -106,19 +101,6 @@ export async function getAllPageImageUrls(
 }
 
 /**
- * Stores a page image in R2.
- */
-export async function storePageImage(
-	assetId: string,
-	pageNumber: number,
-	imageBuffer: Buffer
-): Promise<string> {
-	const key = getPageImageKey(assetId, pageNumber);
-	await uploadToR2(key, imageBuffer, "image/jpeg");
-	return key;
-}
-
-/**
  * Reads asset metadata from R2.
  */
 export async function getAssetMetadata(
@@ -151,21 +133,6 @@ export async function getAssetMetadata(
 }
 
 /**
- * Stores asset metadata in R2.
- */
-export async function storeAssetMetadata(
-	assetId: string,
-	metadata: AssetMetadata
-): Promise<void> {
-	const key = getMetadataKey(assetId);
-	await uploadToR2(
-		key,
-		Buffer.from(JSON.stringify(metadata, null, 2)),
-		"application/json"
-	);
-}
-
-/**
  * Reads conversion status from R2.
  */
 export async function getConversionStatus(
@@ -195,21 +162,6 @@ export async function getConversionStatus(
 		Buffer.concat(chunks.map((c) => Buffer.from(c)))
 	);
 	return JSON.parse(text) as ConversionStatus;
-}
-
-/**
- * Stores conversion status in R2.
- */
-export async function storeConversionStatus(
-	assetId: string,
-	status: ConversionStatus
-): Promise<void> {
-	const key = getConversionStatusKey(assetId);
-	await uploadToR2(
-		key,
-		Buffer.from(JSON.stringify(status, null, 2)),
-		"application/json"
-	);
 }
 
 /**

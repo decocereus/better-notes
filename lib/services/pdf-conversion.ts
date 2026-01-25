@@ -1,26 +1,18 @@
 /**
  * PDF Conversion Service
  *
- * Converts PDF files to page images using external services.
- * Currently supports CloudConvert API for reliable PDF-to-image conversion.
+ * Converts PDF files to page images using a self-hosted Railway converter.
+ * The converter uses Poppler (pdftoppm) for reliable PDF-to-JPEG conversion.
  *
- * This service is designed to handle large PDFs (500MB+, 1300+ pages)
- * that cannot be processed directly by LLM APIs.
+ * This service handles large PDFs (500MB+, 1300+ pages) that cannot be
+ * processed directly by LLM APIs.
  */
 
 import { env } from "@/lib/env";
-import {
-	storeAssetMetadata,
-	storeConversionStatus,
-	storePageImage,
-} from "@/lib/storage/page-images";
-import { getReadUrl } from "@/lib/storage/signed-urls";
-import type { AssetMetadata, ConversionStatus } from "@/types/ocr";
+import type { ConversionStatus } from "@/types/ocr";
 
-/**
- * Regex for extracting page number from CloudConvert output filename.
- */
-const PAGE_NUMBER_REGEX = /(\d+)\.(jpg|png)$/i;
+/** Regex to strip trailing slash from URL */
+const TRAILING_SLASH_REGEX = /\/$/;
 
 /**
  * Options for PDF conversion.
@@ -32,8 +24,6 @@ export interface PdfConversionOptions {
 	dpi?: number;
 	/** Image format (default: jpg) */
 	format?: "jpg" | "png";
-	/** Specific pages to convert (default: all) */
-	pages?: number[];
 }
 
 /**
@@ -47,274 +37,101 @@ export interface PdfConversionResult {
 }
 
 /**
- * CloudConvert job status.
+ * Response from the converter service.
  */
-interface CloudConvertJob {
-	id: string;
-	status: "waiting" | "processing" | "finished" | "error";
-	tasks: CloudConvertTask[];
+interface ConverterResponse {
+	success: boolean;
+	totalPages: number;
+	errors: string[];
 }
 
 /**
- * CloudConvert task.
+ * Validates converter service configuration.
  */
-interface CloudConvertTask {
-	id: string;
-	name: string;
-	operation: string;
-	status: "waiting" | "processing" | "finished" | "error";
-	result?: {
-		files?: Array<{
-			filename: string;
-			url: string;
-		}>;
-	};
-	message?: string;
-}
-
-/**
- * Validates CloudConvert API configuration.
- */
-export function validateCloudConvertConfig(): {
+export function validateConverterConfig(): {
 	valid: boolean;
 	error?: string;
 } {
-	if (!env.CLOUDCONVERT_API_KEY) {
+	if (!env.CONVERTER_URL) {
 		return {
 			valid: false,
-			error: "CLOUDCONVERT_API_KEY is not configured",
+			error: "CONVERTER_URL is not configured",
 		};
 	}
 	return { valid: true };
 }
 
 /**
- * Converts a PDF to images using CloudConvert API.
+ * Converts a PDF to images using the Railway converter service.
  *
  * @param assetId - The asset ID for storing results
  * @param sourceKey - R2 key of the source PDF
  * @param options - Conversion options
  * @param onProgress - Progress callback
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Multi-step API workflow requires sequential logic
 export async function convertPdfToImages(
 	assetId: string,
 	sourceKey: string,
 	options: PdfConversionOptions = {},
 	onProgress?: (converted: number, total: number) => void
 ): Promise<PdfConversionResult> {
-	const config = validateCloudConvertConfig();
+	const config = validateConverterConfig();
 	if (!config.valid) {
 		throw new Error(config.error);
 	}
 
 	const { quality = 85, dpi = 150, format = "jpg" } = options;
 
-	// Initialize conversion status
-	const conversionStatus: ConversionStatus = {
-		status: "processing",
-		pagesProcessed: 0,
-		totalPages: 0,
-		startedAt: new Date().toISOString(),
+	console.log(`[PDF] Calling converter service for asset ${assetId}`);
+
+	// Build request headers
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
 	};
-	await storeConversionStatus(assetId, conversionStatus);
 
-	try {
-		// Get signed URL for the PDF
-		const { readUrl: pdfUrl } = await getReadUrl({
-			key: sourceKey,
-			expiresIn: 7200, // 2 hours for large files
-		});
-
-		// Create CloudConvert job
-		console.log("[PDF] Creating CloudConvert job...");
-		const job = await createCloudConvertJob(pdfUrl, format, dpi, quality);
-		console.log(`[PDF] Job created: ${job.id}`);
-
-		// Wait for job to complete
-		const completedJob = await waitForCloudConvertJob(job.id);
-		console.log(`[PDF] Job completed: ${completedJob.status}`);
-
-		if (completedJob.status === "error") {
-			const errorTask = completedJob.tasks.find((t) => t.status === "error");
-			throw new Error(errorTask?.message || "CloudConvert job failed");
-		}
-
-		// Find the export task with the result files
-		const exportTask = completedJob.tasks.find(
-			(t) => t.operation === "export/url" && t.status === "finished"
-		);
-
-		if (!exportTask?.result?.files) {
-			throw new Error("No output files from CloudConvert");
-		}
-
-		const files = exportTask.result.files;
-		conversionStatus.totalPages = files.length;
-
-		console.log(`[PDF] Downloading ${files.length} page images...`);
-
-		// Download and store each page image
-		const errors: string[] = [];
-		let convertedCount = 0;
-
-		for (const file of files) {
-			// Extract page number from filename (e.g., "page-0001.jpg" or "0001.jpg")
-			const match = file.filename.match(PAGE_NUMBER_REGEX);
-			const pageNumber = match
-				? Number.parseInt(match[1], 10)
-				: convertedCount + 1;
-
-			try {
-				// Download from CloudConvert
-				const response = await fetch(file.url);
-				if (!response.ok) {
-					throw new Error(`Failed to download: ${response.status}`);
-				}
-				const imageBuffer = Buffer.from(await response.arrayBuffer());
-
-				// Store in R2
-				await storePageImage(assetId, pageNumber, imageBuffer);
-
-				convertedCount++;
-				conversionStatus.pagesProcessed = convertedCount;
-				onProgress?.(convertedCount, files.length);
-
-				// Update status periodically
-				if (convertedCount % 10 === 0 || convertedCount === files.length) {
-					await storeConversionStatus(assetId, conversionStatus);
-				}
-			} catch (error) {
-				const errorMsg =
-					error instanceof Error ? error.message : "Unknown error";
-				errors.push(`Page ${pageNumber}: ${errorMsg}`);
-			}
-		}
-
-		// Store metadata
-		const metadata: AssetMetadata = {
-			totalPages: files.length,
-			originalFilename: sourceKey.split("/").pop() || "unknown.pdf",
-			originalSize: 0, // Will be updated later
-			convertedAt: new Date().toISOString(),
-		};
-		await storeAssetMetadata(assetId, metadata);
-
-		// Update final status
-		conversionStatus.status = errors.length > 0 ? "failed" : "completed";
-		conversionStatus.completedAt = new Date().toISOString();
-		if (errors.length > 0) {
-			conversionStatus.error = errors.join("; ");
-		}
-		await storeConversionStatus(assetId, conversionStatus);
-
-		return {
-			success: errors.length === 0,
-			totalPages: files.length,
-			convertedPages: convertedCount,
-			errors,
-		};
-	} catch (error) {
-		// Update status to failed
-		conversionStatus.status = "failed";
-		conversionStatus.error =
-			error instanceof Error ? error.message : "Unknown error";
-		conversionStatus.completedAt = new Date().toISOString();
-		await storeConversionStatus(assetId, conversionStatus);
-
-		throw error;
+	if (env.CONVERTER_TOKEN) {
+		headers.Authorization = `Bearer ${env.CONVERTER_TOKEN}`;
 	}
-}
 
-/**
- * Creates a CloudConvert job for PDF to image conversion.
- */
-async function createCloudConvertJob(
-	pdfUrl: string,
-	format: "jpg" | "png",
-	dpi: number,
-	quality: number
-): Promise<CloudConvertJob> {
-	const apiKey = env.CLOUDCONVERT_API_KEY;
-
-	const response = await fetch("https://api.cloudconvert.com/v2/jobs", {
+	// Call the converter service
+	const converterUrl = env.CONVERTER_URL.replace(TRAILING_SLASH_REGEX, "");
+	const response = await fetch(`${converterUrl}/convert`, {
 		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"Content-Type": "application/json",
-		},
+		headers,
 		body: JSON.stringify({
-			tasks: {
-				"import-pdf": {
-					operation: "import/url",
-					url: pdfUrl,
-				},
-				"convert-to-images": {
-					operation: "convert",
-					input: ["import-pdf"],
-					input_format: "pdf",
-					output_format: format,
-					engine: "poppler",
-					pages: "1-", // All pages
-					density: dpi,
-					quality,
-					filename: "page-%04d.{format}",
-				},
-				"export-images": {
-					operation: "export/url",
-					input: ["convert-to-images"],
-				},
-			},
+			assetId,
+			sourceKey,
+			dpi,
+			quality,
+			format,
 		}),
 	});
 
 	if (!response.ok) {
-		const errorData = await response.json().catch(() => ({}));
+		const errorData = (await response.json().catch(() => ({}))) as {
+			error?: string;
+		};
 		throw new Error(
-			`CloudConvert API error: ${response.status} - ${JSON.stringify(errorData)}`
+			`Converter service error: ${response.status} - ${errorData.error || "Unknown error"}`
 		);
 	}
 
-	const data = (await response.json()) as { data: CloudConvertJob };
-	return data.data;
-}
+	const result = (await response.json()) as ConverterResponse;
+	console.log(
+		`[PDF] Conversion complete: ${result.totalPages} pages, ${result.errors.length} errors`
+	);
 
-/**
- * Waits for a CloudConvert job to complete.
- */
-async function waitForCloudConvertJob(
-	jobId: string,
-	maxWaitMs = 3_600_000 // 1 hour max
-): Promise<CloudConvertJob> {
-	const apiKey = env.CLOUDCONVERT_API_KEY;
-	const startTime = Date.now();
-
-	while (Date.now() - startTime < maxWaitMs) {
-		const response = await fetch(
-			`https://api.cloudconvert.com/v2/jobs/${jobId}`,
-			{
-				headers: {
-					Authorization: `Bearer ${apiKey}`,
-				},
-			}
-		);
-
-		if (!response.ok) {
-			throw new Error(`Failed to check job status: ${response.status}`);
-		}
-
-		const data = (await response.json()) as { data: CloudConvertJob };
-		const job = data.data;
-
-		if (job.status === "finished" || job.status === "error") {
-			return job;
-		}
-
-		// Wait 5 seconds before polling again
-		await new Promise((resolve) => setTimeout(resolve, 5000));
+	// Call progress callback with final state
+	if (onProgress && result.totalPages > 0) {
+		onProgress(result.totalPages, result.totalPages);
 	}
 
-	throw new Error("CloudConvert job timed out");
+	return {
+		success: result.success,
+		totalPages: result.totalPages,
+		convertedPages: result.totalPages - result.errors.length,
+		errors: result.errors,
+	};
 }
 
 /**

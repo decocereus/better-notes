@@ -13,7 +13,7 @@ import { validateOcrModelConfig } from "@/lib/ai/models";
 import { runOcrPipeline } from "@/lib/ai/ocr";
 import {
 	convertPdfToImages,
-	validateCloudConvertConfig,
+	validateConverterConfig,
 } from "@/lib/services/pdf-conversion";
 import { validateR2Config } from "@/lib/storage/r2-client";
 import type { StartOcrPipelineInput } from "@/types/ocr";
@@ -158,12 +158,12 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const cloudConvertConfig = validateCloudConvertConfig();
-		if (!cloudConvertConfig.valid) {
+		const converterConfig = validateConverterConfig();
+		if (!converterConfig.valid) {
 			return NextResponse.json(
 				{
-					error: "CloudConvert not configured",
-					details: cloudConvertConfig.error,
+					error: "PDF converter not configured",
+					details: converterConfig.error,
 				},
 				{ status: 503 }
 			);

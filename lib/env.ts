@@ -10,8 +10,9 @@ export const env = {
 	GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
 	// Anthropic API for Claude fallback OCR
 	ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
-	// CloudConvert API for PDF-to-image conversion
-	CLOUDCONVERT_API_KEY: process.env.CLOUDCONVERT_API_KEY ?? "",
+	// Self-hosted PDF converter (Railway)
+	CONVERTER_URL: process.env.CONVERTER_URL ?? "",
+	CONVERTER_TOKEN: process.env.CONVERTER_TOKEN ?? "",
 	// Cloudflare R2 Storage
 	R2_ENDPOINT: process.env.R2_ENDPOINT ?? "",
 	R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "",

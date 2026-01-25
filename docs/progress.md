@@ -4,9 +4,57 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
-**OCR Pipeline Redesign Complete** ✅ - PDF-to-Images with Multi-Model Fallback
+**Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 159 passing
+
+---
+
+## Self-Hosted PDF Converter Migration (2026-01-25) - Complete
+
+**Problem:** CloudConvert is a paid third-party service with usage limits and costs. For large PDF processing (500MB+, 1300+ pages), a self-hosted solution is more economical and reliable.
+
+**Solution:** Replaced CloudConvert with a self-hosted Railway converter service using Poppler's `pdftoppm` for PDF-to-JPEG conversion.
+
+### Architecture
+
+```
+PDF Upload → Railway Converter (Poppler pdftoppm) → R2 Storage
+    → Downloads PDF from R2
+    → Converts pages to JPEG (150 DPI, 85% quality)
+    → Uploads page images to R2
+    → Writes conversion-status.json
+    → OCR pipeline continues as before
+```
+
+### Files Created
+
+- `scripts/converter/Dockerfile` - Debian-slim + Poppler image for Railway
+- `scripts/converter/convert.ts` - HTTP server with /convert and /status endpoints
+- `scripts/converter/package.json` - Dependencies for S3 client and TypeScript
+- `scripts/converter/tsconfig.json` - TypeScript configuration
+- `scripts/converter/README.md` - Deployment and usage documentation
+
+### Files Modified
+
+- `lib/env.ts` - Replaced `CLOUDCONVERT_API_KEY` with `CONVERTER_URL` and `CONVERTER_TOKEN`
+- `lib/services/pdf-conversion.ts` - Complete rewrite to call Railway converter service
+- `app/api/ocr/start/route.ts` - Updated to use `validateConverterConfig`
+
+### Environment Variables Required
+
+```env
+CONVERTER_URL=https://your-converter.railway.app  # Railway deployment URL
+CONVERTER_TOKEN=xxx                                # Optional shared secret
+```
+
+### Deployment
+
+1. Create new Railway project
+2. Set root directory to `scripts/converter`
+3. Add R2 environment variables (R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME)
+4. Optionally add CONVERTER_TOKEN for authentication
+5. Deploy - Railway auto-builds from Dockerfile
 
 ---
 
@@ -19,7 +67,7 @@ Track completed work, current status, and next steps.
 ### Architecture
 
 ```
-PDF Upload → CloudConvert (PDF-to-images) → R2 Storage
+PDF Upload → Railway Converter (PDF-to-images) → R2 Storage
     → Gemini Flash (parallel OCR, 10 pages at a time)
     → Quality Check (confidence, word count, illegible ratio)
     → Claude Sonnet retry (low-quality pages)
@@ -92,7 +140,8 @@ const DEFAULT_RETRY_THRESHOLDS = {
 ### Environment Variables Required
 
 ```env
-CLOUDCONVERT_API_KEY=xxx      # For PDF-to-image conversion
+CONVERTER_URL=xxx             # Self-hosted Railway converter URL
+CONVERTER_TOKEN=xxx           # Optional shared secret for converter
 ANTHROPIC_API_KEY=xxx         # For Claude Sonnet fallback
 GOOGLE_GENERATIVE_AI_API_KEY=xxx  # For Gemini Flash primary
 ```

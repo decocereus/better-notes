@@ -19,6 +19,20 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-25 - Self-Hosted PDF Converter with Poppler
+
+**Context:** Replacing CloudConvert with a self-hosted solution for PDF-to-image conversion
+**Problem:** CloudConvert is a paid third-party service with usage limits. For high-volume PDF processing, costs add up and you depend on external service availability.
+**Solution:** Deploy a self-hosted converter on Railway using Poppler's `pdftoppm`. Poppler is the standard open-source PDF rendering library used by most Linux distributions.
+**Lesson:** For PDF-to-image conversion, `pdftoppm` (Poppler) is reliable and fast. Command: `pdftoppm -jpeg -r 150 -jpegopt quality=85 input.pdf output-prefix`. The `-r` flag sets DPI. Railway's free tier can handle occasional conversions; scale up for production workloads.
+
+### 2026-01-25 - Node.js HTTP Server Without Express
+
+**Context:** Building a simple converter service for Railway deployment
+**Problem:** Express adds overhead and dependencies for what is essentially two HTTP endpoints
+**Solution:** Use Node.js native `http.createServer()` with manual routing. Parse URL with `new URL()`, parse body by collecting chunks, send JSON with `res.writeHead()` and `res.end()`.
+**Lesson:** For simple microservices with few endpoints, native Node.js HTTP is sufficient. It reduces container size and cold start time. Pattern: async handler function that catches all errors and sends JSON responses.
+
 ### 2026-01-23 - CloudConvert API for PDF-to-Image Conversion
 
 **Context:** Implementing PDF-to-image conversion for large PDFs (500MB+, 1300+ pages)
