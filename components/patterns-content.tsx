@@ -142,9 +142,6 @@ export function PatternsContent() {
 		sources: number;
 		lastUpdatedAt?: string | null;
 	} | null>(null);
-	const [sectionsByType, setSectionsByType] = useState<
-		Partial<Record<ContentType, string[]>>
-	>({});
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -169,7 +166,6 @@ export function PatternsContent() {
 			const data = (await response.json()) as PatternsResponse;
 			const cleanedItems = sanitizeExtractedItems(data.items ?? []);
 			setExtractedItems(cleanedItems);
-			setSectionsByType(data.sections ?? {});
 			setSummary({
 				totalItems: cleanedItems.length,
 				totalEssays: data.totalEssays ?? 0,
@@ -552,10 +548,7 @@ export function PatternsContent() {
 					</div>
 
 					{/* Content browser */}
-					<ExtractedContentBrowser
-						items={extractedItems}
-						sectionsByType={sectionsByType}
-					/>
+					<ExtractedContentBrowser items={extractedItems} />
 				</>
 			)}
 

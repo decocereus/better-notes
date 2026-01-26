@@ -54,6 +54,16 @@ export interface ThemeMapping {
 }
 
 /**
+ * Attribution metadata for quotes, thinkers, books, poems, or references.
+ */
+export interface ContentAttribution {
+	name?: string;
+	role?: string;
+	work?: string;
+	year?: string;
+}
+
+/**
  * A piece of extracted content from an essay or note.
  */
 export interface ExtractedContent {
@@ -66,12 +76,17 @@ export interface ExtractedContent {
 
 	content: string; // The actual extracted text
 	context?: string; // Surrounding context for understanding
+	verbatimText?: string; // Exact OCR excerpt
+	detailsMarkdown?: string; // Expanded explanation/usage in markdown
 
 	quality: ContentQuality;
 	isOverused: boolean; // Flag for Gandhi, Buddha, etc.
 	multiUse: boolean; // Applicable across multiple themes
 
 	themes: ThemeMapping[];
+	attribution?: ContentAttribution;
+	sourcePageStart?: number;
+	sourcePageEnd?: number;
 
 	createdAt: string;
 	updatedAt?: string;

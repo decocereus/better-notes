@@ -54,12 +54,23 @@ export const ExtractedItemSchema = z.object({
 	content: z
 		.string()
 		.min(5)
-		.describe("The extracted text content (minimum 5 characters)"),
+		.describe("One-line summary of the extracted content"),
+
+	verbatimText: z
+		.string()
+		.min(10)
+		.optional()
+		.describe("Exact OCR excerpt copied verbatim from the essay text"),
 
 	context: z
 		.string()
 		.optional()
 		.describe("Surrounding context for understanding"),
+
+	detailsMarkdown: z
+		.string()
+		.optional()
+		.describe("Expanded explanation/usage in markdown"),
 
 	quality: QualitySchema.describe("Quality assessment of the content"),
 
@@ -98,6 +109,30 @@ export const ExtractedItemSchema = z.object({
 		.enum(["why", "how", "what_if", "multi_stakeholder"])
 		.optional()
 		.describe("Type of argument framing"),
+
+	sourcePageStart: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("Start page for the verbatim excerpt"),
+
+	sourcePageEnd: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("End page for the verbatim excerpt"),
+
+	attribution: z
+		.object({
+			name: z.string().optional().describe("Speaker or author name"),
+			role: z.string().optional().describe("Role (thinker/poet/leader/etc.)"),
+			work: z.string().optional().describe("Source work (book/poem/etc.)"),
+			year: z.string().optional().describe("Year if present in text"),
+		})
+		.optional()
+		.describe("Attribution metadata for quotes or references"),
 });
 
 export type ExtractedItem = z.infer<typeof ExtractedItemSchema>;
