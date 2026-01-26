@@ -15,9 +15,9 @@ Track completed work, current status, and next steps.
 
 ## Extraction Quality & Parallelization (2026-01-27) - Complete
 
-**Problem:** Extraction output had poor field usage (field names as content, usage guidance in wrong fields) and sequential processing was slow for 200-500+ essays.
+**Problem:** Extraction output had poor field usage (field names as content, usage guidance in wrong fields) and sequential processing was slow for 200-500+ essays. Additionally, large PDFs (1300+ pages) were only partially processed because all pages were sent to the LLM in a single boundary detection prompt.
 
-**Solution:** Two-phase fix: (1) Add few-shot examples to prompts showing correct vs incorrect output, (2) Add parallel batch processing with Promise.allSettled.
+**Solution:** Three-phase fix: (1) Few-shot examples for field quality, (2) Parallel batch extraction, (3) Chunked boundary detection.
 
 ### Phase 1: Prompt Improvements
 - Added concrete few-shot examples showing CORRECT field usage
@@ -25,16 +25,24 @@ Track completed work, current status, and next steps.
 - Clarified field purposes: content = headline, verbatimText = exact quote, detailsMarkdown = usage guidance
 - Reinforced quality-over-quantity principle
 
-### Phase 2: Parallel Processing
+### Phase 2: Parallel Extraction
 - `extractContentBatch()` now processes essays in parallel batches
 - Default concurrency: 3, max: 5 (to avoid rate limits)
 - Uses `Promise.allSettled` for partial success handling
 - Falls back to sequential for small batches
 - Maintains result ordering despite parallel execution
 
+### Phase 3: Chunked Boundary Detection
+- `detectEssayBoundaries()` now splits large PDFs into 50-page batches
+- Batches overlap by 5 pages to detect essays at boundaries
+- Processes batches in parallel (concurrency: 3)
+- Merges results, handling duplicate/overlapping essays from overlap regions
+- Ensures all 1300+ pages are now processed instead of just ~900
+
 ### Files Modified
 - `lib/llm/prompts/extraction.ts` - Few-shot examples in system prompt
 - `lib/extraction/content-extractor.ts` - Parallel batch processing
+- `lib/extraction/essay-detector.ts` - Chunked boundary detection for large PDFs
 
 ---
 

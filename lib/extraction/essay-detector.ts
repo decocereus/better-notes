@@ -2,6 +2,11 @@
  * Essay Boundary Detector
  * Detects where individual essays start and end within OCR'd PDF text.
  * Uses LLM to identify essay boundaries based on content patterns.
+ *
+ * For large PDFs (1000+ pages), uses chunked processing:
+ * - Splits pages into batches of ~50 pages
+ * - Processes batches in parallel
+ * - Merges results, handling essays that span batch boundaries
  */
 
 import { generateObject, generateText } from "ai";
@@ -14,6 +19,15 @@ import type { OcrPageResult } from "@/types/processing";
  * Regex for splitting text into words.
  */
 const WORD_SPLIT_REGEX = /\s+/;
+
+/** Pages per batch for boundary detection (keep small for LLM context) */
+const PAGES_PER_BATCH = 50;
+
+/** Maximum concurrent batch processing */
+const MAX_BOUNDARY_CONCURRENCY = 3;
+
+/** Overlap pages between batches to detect cross-boundary essays */
+const BATCH_OVERLAP_PAGES = 5;
 
 /**
  * Schema for essay boundary detection response.
@@ -206,29 +220,53 @@ Identify where each individual essay starts and ends. Consider word count, conte
 
 /**
  * Detects essay boundaries in OCR'd text.
+ * For large PDFs, uses chunked parallel processing.
  *
  * @param ocrResults - Array of OCR results for each page
+ * @param onProgress - Optional callback for progress updates
  * @returns Array of essay boundaries with start/end pages
  */
 export async function detectEssayBoundaries(
-	ocrResults: OcrPageResult[]
+	ocrResults: OcrPageResult[],
+	onProgress?: (processed: number, total: number) => void
 ): Promise<EssayBoundary[]> {
 	if (ocrResults.length === 0) {
 		return [];
 	}
 
+	// Sort by page number
+	const sorted = [...ocrResults].sort((a, b) => a.pageNumber - b.pageNumber);
+
 	// For very short documents (1-2 pages), assume single essay
-	if (ocrResults.length <= 2) {
-		const totalWords = ocrResults.reduce((sum, r) => sum + r.wordCount, 0);
+	if (sorted.length <= 2) {
+		const totalWords = sorted.reduce((sum, r) => sum + r.wordCount, 0);
 		return [
 			{
-				startPage: Math.min(...ocrResults.map((r) => r.pageNumber)),
-				endPage: Math.max(...ocrResults.map((r) => r.pageNumber)),
+				startPage: Math.min(...sorted.map((r) => r.pageNumber)),
+				endPage: Math.max(...sorted.map((r) => r.pageNumber)),
 				wordCount: totalWords,
 			},
 		];
 	}
 
+	// For small documents, use single-batch processing
+	if (sorted.length <= PAGES_PER_BATCH) {
+		return await detectBoundariesInBatch(sorted);
+	}
+
+	// For large documents, use chunked parallel processing
+	console.log(
+		`[EssayDetector] Large PDF detected (${sorted.length} pages), using chunked processing`
+	);
+	return await detectBoundariesChunked(sorted, onProgress);
+}
+
+/**
+ * Detects boundaries in a single batch of pages.
+ */
+async function detectBoundariesInBatch(
+	ocrResults: OcrPageResult[]
+): Promise<EssayBoundary[]> {
 	const model = getModel("EXTRACTION");
 	const prompt = createBoundaryDetectionPrompt(ocrResults);
 
@@ -276,6 +314,267 @@ export async function detectEssayBoundaries(
 			return convertToBoundaries(parsedFreeform, ocrResults);
 		}
 	}
+}
+
+/**
+ * Processes large PDFs by splitting into batches and processing in parallel.
+ */
+async function detectBoundariesChunked(
+	ocrResults: OcrPageResult[],
+	onProgress?: (processed: number, total: number) => void
+): Promise<EssayBoundary[]> {
+	// Create batches with overlap to detect cross-boundary essays
+	const batches = createPageBatches(
+		ocrResults,
+		PAGES_PER_BATCH,
+		BATCH_OVERLAP_PAGES
+	);
+	const totalBatches = batches.length;
+
+	console.log(
+		`[EssayDetector] Split into ${totalBatches} batches of ~${PAGES_PER_BATCH} pages each`
+	);
+
+	// Process batches with controlled concurrency
+	const allBoundaries: EssayBoundary[][] = new Array(totalBatches);
+	let processedBatches = 0;
+
+	// Process in waves of MAX_BOUNDARY_CONCURRENCY
+	for (let i = 0; i < totalBatches; i += MAX_BOUNDARY_CONCURRENCY) {
+		const waveBatches = batches.slice(i, i + MAX_BOUNDARY_CONCURRENCY);
+		const wavePromises = waveBatches.map(async (batch, waveIndex) => {
+			const batchIndex = i + waveIndex;
+			try {
+				const boundaries = await detectBoundariesInBatch(batch.pages);
+				return { batchIndex, boundaries, success: true as const };
+			} catch (error) {
+				console.error(
+					`[EssayDetector] Batch ${batchIndex} failed:`,
+					error instanceof Error ? error.message : error
+				);
+				return { batchIndex, boundaries: [], success: false as const };
+			}
+		});
+
+		const waveResults = await Promise.allSettled(wavePromises);
+
+		for (const result of waveResults) {
+			if (result.status === "fulfilled") {
+				allBoundaries[result.value.batchIndex] = result.value.boundaries;
+				processedBatches++;
+				onProgress?.(processedBatches, totalBatches);
+			}
+		}
+	}
+
+	// Merge boundaries from all batches
+	const merged = mergeBatchBoundaries(allBoundaries, ocrResults);
+
+	console.log(
+		`[EssayDetector] Detected ${merged.length} essays across ${totalBatches} batches`
+	);
+
+	return merged;
+}
+
+/**
+ * Creates page batches with overlap for boundary detection.
+ */
+function createPageBatches(
+	ocrResults: OcrPageResult[],
+	batchSize: number,
+	overlapPages: number
+): Array<{ pages: OcrPageResult[]; startIndex: number; endIndex: number }> {
+	const batches: Array<{
+		pages: OcrPageResult[];
+		startIndex: number;
+		endIndex: number;
+	}> = [];
+
+	const step = batchSize - overlapPages;
+
+	for (let i = 0; i < ocrResults.length; i += step) {
+		const endIndex = Math.min(i + batchSize, ocrResults.length);
+		const pages = ocrResults.slice(i, endIndex);
+
+		batches.push({
+			pages,
+			startIndex: i,
+			endIndex: endIndex - 1,
+		});
+
+		// Stop if we've reached the end
+		if (endIndex >= ocrResults.length) {
+			break;
+		}
+	}
+
+	return batches;
+}
+
+/**
+ * Merges boundaries from multiple batches, handling essays that span batches.
+ */
+function mergeBatchBoundaries(
+	batchBoundaries: EssayBoundary[][],
+	allOcrResults: OcrPageResult[]
+): EssayBoundary[] {
+	const pageWordCounts = buildPageWordCountMap(allOcrResults);
+	const flattened = flattenBoundaries(batchBoundaries);
+	const merged = mergeOverlappingBoundaries(flattened, pageWordCounts);
+	return deduplicateBoundaries(merged, pageWordCounts);
+}
+
+/**
+ * Builds a map of page numbers to word counts.
+ */
+function buildPageWordCountMap(
+	ocrResults: OcrPageResult[]
+): Map<number, number> {
+	const pageWordCounts = new Map<number, number>();
+	for (const result of ocrResults) {
+		pageWordCounts.set(result.pageNumber, result.wordCount);
+	}
+	return pageWordCounts;
+}
+
+/**
+ * Flattens all boundaries from batches into a sorted array.
+ */
+function flattenBoundaries(
+	batchBoundaries: EssayBoundary[][]
+): EssayBoundary[] {
+	const allBoundaries: EssayBoundary[] = [];
+
+	for (const boundaries of batchBoundaries) {
+		if (!boundaries) {
+			continue;
+		}
+		for (const boundary of boundaries) {
+			allBoundaries.push(boundary);
+		}
+	}
+
+	// Sort by start page
+	allBoundaries.sort((a, b) => a.startPage - b.startPage);
+	return allBoundaries;
+}
+
+/**
+ * Calculates word count for a page range.
+ */
+function calculateWordCount(
+	startPage: number,
+	endPage: number,
+	pageWordCounts: Map<number, number>
+): number {
+	let wordCount = 0;
+	for (let page = startPage; page <= endPage; page++) {
+		wordCount += pageWordCounts.get(page) ?? 0;
+	}
+	return wordCount;
+}
+
+/**
+ * Checks if two boundaries have matching titles.
+ */
+function hasSameTitle(a: EssayBoundary, b: EssayBoundary): boolean {
+	if (!(a.title && b.title)) {
+		return false;
+	}
+	return (
+		a.title === b.title ||
+		a.title.includes(b.title) ||
+		b.title.includes(a.title)
+	);
+}
+
+/**
+ * Merges overlapping or adjacent boundaries from batch overlaps.
+ */
+function mergeOverlappingBoundaries(
+	boundaries: EssayBoundary[],
+	pageWordCounts: Map<number, number>
+): EssayBoundary[] {
+	const merged: EssayBoundary[] = [];
+
+	for (const boundary of boundaries) {
+		const last = merged.at(-1);
+
+		if (!last || boundary.startPage > last.endPage + 1) {
+			// No overlap, add as new boundary
+			merged.push({ ...boundary });
+			continue;
+		}
+
+		// Check if should merge
+		const overlapAmount = last.endPage - boundary.startPage + 1;
+		const shouldMerge =
+			overlapAmount >= BATCH_OVERLAP_PAGES - 1 || hasSameTitle(last, boundary);
+
+		if (shouldMerge) {
+			// Extend the last boundary
+			last.endPage = Math.max(last.endPage, boundary.endPage);
+			// Keep the more descriptive title
+			if (
+				boundary.title &&
+				(!last.title || boundary.title.length > last.title.length)
+			) {
+				last.title = boundary.title;
+			}
+			// Recalculate word count
+			last.wordCount = calculateWordCount(
+				last.startPage,
+				last.endPage,
+				pageWordCounts
+			);
+		} else {
+			// Different essay, add as new
+			merged.push({ ...boundary });
+		}
+	}
+
+	return merged;
+}
+
+/**
+ * Removes duplicates and fixes any remaining overlaps.
+ */
+function deduplicateBoundaries(
+	boundaries: EssayBoundary[],
+	pageWordCounts: Map<number, number>
+): EssayBoundary[] {
+	const deduped: EssayBoundary[] = [];
+
+	for (const boundary of boundaries) {
+		const last = deduped.at(-1);
+
+		if (!last || boundary.startPage > last.endPage) {
+			deduped.push(boundary);
+			continue;
+		}
+
+		// Overlapping - prefer the one with more content
+		const boundarySize = boundary.endPage - boundary.startPage;
+		const lastSize = last.endPage - last.startPage;
+
+		if (boundarySize > lastSize) {
+			// Adjust start to avoid overlap
+			const adjusted = { ...boundary };
+			adjusted.startPage = last.endPage + 1;
+			if (adjusted.startPage <= adjusted.endPage) {
+				adjusted.wordCount = calculateWordCount(
+					adjusted.startPage,
+					adjusted.endPage,
+					pageWordCounts
+				);
+				deduped.push(adjusted);
+			}
+		}
+		// Otherwise skip this boundary (it's a duplicate or smaller)
+	}
+
+	return deduped;
 }
 
 /**
