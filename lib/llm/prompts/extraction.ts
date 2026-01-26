@@ -10,69 +10,107 @@ import type { ExampleCategory, ExtractionParameters } from "@/types/extraction";
  */
 export const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing UPSC topper essays and extracting valuable content for revision.
 
-Your task is to extract the following types of content:
+## CONTENT TYPES TO EXTRACT
 
-1. **INTRODUCTIONS**: How the essay opens
-   - Anecdotes that clarify the topic
-   - Quotes that set the tone
-   - Movie/book references
-   - Catchy opening phrases
-   - Contemporary examples as hooks
+1. **INTRODUCTIONS**: Opening techniques (anecdotes, quotes, hooks, contemporary references)
+2. **CONCLUSIONS**: Closing techniques (quote-based, circular structure, forward-looking)
+3. **EXAMPLES**: Concrete illustrations by category (individual, ethical, governance, societal, environment, mythological, sports, religion, business, international_relations, science_tech)
+4. **QUOTES**: Memorable statements (multi-use preferred, theme-specific when strong)
+5. **THINKERS**: Referenced intellectuals with their key ideas
+6. **ARGUMENTS**: Reasoning patterns (WHY/HOW/WHAT IF framing)
+7. **BOOKS & POEMS**: Literary references with how they support arguments
+8. **KEYWORDS & PHRASES**: Reusable sophisticated language
 
-2. **CONCLUSIONS**: How the essay closes
-   - Quote-based endings
-   - Ellipse back to introduction (circular structure)
-   - Sanskrit shlokas or wisdom quotes
-   - Forward-looking statements
-   - Summary with call to action
+## CRITICAL: FIELD DEFINITIONS
 
-3. **EXAMPLES**: Concrete illustrations (categorize each)
-   - Individual aspect (personal stories, human element)
-   - Ethical aspect (moral dilemmas, value-based)
-   - Governance (bureaucrats, schemes, Panchayati Raj, RTI)
-   - Societal (vulnerable groups, tribals, women, SC/ST, LGBTQIA+)
-   - Environment (climate change, biodiversity, eco-feminism)
-   - Mythological (Indian mythology preferred, universal lessons)
-   - Sports (athletes, teamwork, perseverance)
-   - Religion (interfaith harmony, spiritual wisdom)
-   - Business (entrepreneurs, corporate ethics, innovation)
-   - International Relations (diplomacy, global cooperation)
-   - Science & Technology (innovations, digital divide, AI ethics)
+Each extracted item MUST have these fields filled correctly:
 
-4. **QUOTES**: Memorable statements
-   - Multi-use quotes (applicable across themes)
-   - Theme-specific quotes
-   - Original phrasings worth remembering
+| Field | What Goes Here | Example |
+|-------|----------------|---------|
+| **content** | One-line headline/summary (5-15 words) | "Technology-policy lag as governance challenge" |
+| **verbatimText** | EXACT quote copied from OCR text | "In the 19th century, a policy lasted for decades. But today, by the time a policy comes, a new technology has already arrived." |
+| **detailsMarkdown** | Usage guidance, why it works, when to use | "**Why it works:** Concrete temporal contrast shows urgency.\\n**Use for:** Technology governance, policy reform, digital India themes." |
+| **context** | Brief situational note if needed | "From introduction paragraph" |
 
-5. **THINKERS**: Referenced intellectuals
-   - Indian thinkers (Gandhi, Vivekananda, Tagore, Kalam, Ambedkar)
-   - Western thinkers (Aristotle, Marx, Rawls, Amartya Sen)
-   - Their key ideas and how they're applied
+## FEW-SHOT EXAMPLES
 
-6. **ARGUMENTS**: Core reasoning patterns
-   - WHY-framing (reasons and causes)
-   - HOW-framing (methods and processes)
-   - WHAT IF-framing (scenarios and implications)
-   - Multi-stakeholder perspectives (Family, Society, Nation, World)
+### CORRECT Example 1 (Introduction):
+\`\`\`json
+{
+  "contentType": "introduction",
+  "content": "Climate change framed as contemporary moral imperative",
+  "verbatimText": "Climate change is a reality of contemporary times. It is a result of mainly the anthropogenic activities which have resulted in an increase in global average temperature.",
+  "detailsMarkdown": "**Why it works:** Direct problem statement without flowery language. Immediately frames human responsibility.\\n\\n**Use for:** Climate essays, environment themes, intergenerational justice.\\n\\n**Technique:** Contemporary framing + causation in opening line.",
+  "quality": "high",
+  "multiUse": true,
+  "isOverused": false
+}
+\`\`\`
 
-7. **BOOKS & POEMS**: Literary references
-   - Book titles with relevant points
-   - Poetry excerpts (especially Indian poets)
-   - How they support the argument
+### CORRECT Example 2 (Quote):
+\`\`\`json
+{
+  "contentType": "quote",
+  "content": "Gandhi on means-ends relationship in ethics",
+  "verbatimText": "The means may be likened to a seed, the end to a tree; and there is just the same inviolable connection between the means and the end as there is between the seed and the tree.",
+  "detailsMarkdown": "**Why it works:** Organic metaphor makes abstract ethics concrete.\\n\\n**Use for:** Ethics essays, governance integrity, ends-justify-means debates.\\n\\n**Pairs with:** Consequentialism vs deontology arguments.",
+  "attribution": {
+    "name": "Mahatma Gandhi",
+    "role": "Freedom fighter and philosopher"
+  },
+  "quality": "high",
+  "multiUse": true,
+  "isOverused": false
+}
+\`\`\`
 
-8. **KEYWORDS & PHRASES**: Reusable language
-   - Multi-theme applicable phrases
-   - Sophisticated vocabulary usage
-   - Transition phrases
+### CORRECT Example 3 (Example - Governance):
+\`\`\`json
+{
+  "contentType": "example",
+  "exampleCategory": "governance",
+  "content": "Swachh Bharat Mission behavioral change success",
+  "verbatimText": "The Swachh Bharat Mission did not just build toilets but changed mindsets. Open defecation reduced from 550 million to under 50 million in 5 years.",
+  "detailsMarkdown": "**Why it works:** Quantified impact + behavioral angle (not just infrastructure).\\n\\n**Use for:** Governance success stories, behavioral economics, sanitation/health themes.\\n\\n**Avoid:** Don't use if essay already has 2+ government scheme examples.",
+  "quality": "high",
+  "multiUse": true,
+  "isOverused": false
+}
+\`\`\`
 
-Quality Assessment:
-- **HIGH**: Unique, insightful, directly usable, well-crafted
-- **MEDIUM**: Good but somewhat common, still valuable
-- **LOW**: Generic, overused, or weakly connected
+### WRONG - DO NOT DO THIS:
+\`\`\`json
+// WRONG: Field name as content
+{ "content": "detailsMarkdown", ... }
 
-Flag as OVERUSED: Gandhi (in generic contexts), Buddha (clichéd usage), Ashoka, Mandela, "Vasudhaiva Kutumbakam" (unless unique angle)
+// WRONG: Usage guidance as content (should be in detailsMarkdown)
+{ "content": "Works for any current global challenge essay", ... }
 
-Flag as MULTI-USE: Content applicable across 3+ themes without modification`;
+// WRONG: Missing verbatimText, vague summary
+{ "content": "Good opening technique", "verbatimText": "", ... }
+
+// WRONG: Paraphrased instead of verbatim
+{ "verbatimText": "Climate change is happening due to human activities", ... }
+\`\`\`
+
+## QUALITY ASSESSMENT
+
+- **HIGH**: Unique angle, concrete/specific, directly quotable, well-crafted
+- **MEDIUM**: Solid but common framing, still useful for revision
+- **LOW**: Generic, vague, or weakly connected
+
+## FLAGS
+
+- **isOverused**: Gandhi/Buddha/Ashoka/Mandela in generic contexts, "Vasudhaiva Kutumbakam" without unique angle
+- **multiUse**: Applicable across 3+ themes without modification
+
+## RULES
+
+1. **verbatimText MUST be exact OCR text** - copy-paste, do not paraphrase
+2. **content is a headline** - short, specific, describes what the item IS
+3. **detailsMarkdown explains usage** - why it works, when to use, what it pairs with
+4. Do not invent names, dates, or sources - only use what appears in the text
+5. Quality over quantity - 15 high-quality items beats 50 mediocre ones`;
 
 /**
  * Category descriptions for better extraction context.
@@ -181,18 +219,21 @@ Minimum Quality Threshold: ${parameters.minQualityThreshold}
 
 ${parameters.extractCrossThemeRefs ? "Identify cross-theme applicability for multi-use content." : ""}
 
-Extract all valuable content following the system guidelines. For each item:
-1. Identify the content type
-2. Extract the exact text
-3. Provide context if helpful
-4. Assess quality
-5. Flag if overused
-6. Note if multi-use applicable
+EXTRACTION CHECKLIST (for each item):
+1. **content**: Write a specific 5-15 word headline (NOT field names, NOT usage guidance)
+2. **verbatimText**: Copy-paste EXACT text from the essay (no paraphrasing)
+3. **detailsMarkdown**: Explain WHY it works + WHEN to use it + WHAT it pairs with
+4. **quality**: Assess honestly (high/medium/low)
+5. **isOverused**: Flag if Gandhi/Buddha/Ashoka/Mandela in generic context
+6. **multiUse**: True if works across 3+ themes
+7. **attribution**: Include name/role/work/year if present in text
 
-Also provide a short markdown summary per content type:
-- Use a bullet list
-- Max 6 bullets per section
-- Keep it concise and reusable`;
+REMEMBER:
+- "content" field = WHAT the item IS (headline)
+- "detailsMarkdown" field = HOW to USE it (guidance)
+- Never put usage guidance in the content field
+- Never output field names as content
+- Quality over quantity - extract fewer, better items`;
 }
 
 /**

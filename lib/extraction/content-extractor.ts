@@ -32,42 +32,47 @@ import {
  * Regex for splitting text into words.
  */
 const WORD_SPLIT_REGEX = /\s+/;
-const EXTRACTION_JSON_INSTRUCTIONS = `Return ONLY valid JSON that matches this shape:
+const EXTRACTION_JSON_INSTRUCTIONS = `Return ONLY valid JSON. CRITICAL FIELD RULES:
+
+- "content": Short headline (5-15 words) describing WHAT the item IS
+  CORRECT: "Technology-policy lag as governance challenge"
+  WRONG: "detailsMarkdown" or "Works for any essay"
+
+- "verbatimText": EXACT quote from essay text (copy-paste, no paraphrasing)
+  CORRECT: "In the 19th century, a policy lasted for decades..."
+  WRONG: "" or paraphrased version
+
+- "detailsMarkdown": Usage guidance - WHY it works, WHEN to use, WHAT it pairs with
+  CORRECT: "**Why it works:** Concrete contrast...\\n**Use for:** Tech governance..."
+
+JSON shape:
 {
   "items": [
     {
       "contentType": "introduction|conclusion|example|quote|thinker|argument|book_poem|keyword_phrase",
       "exampleCategory": "individual|ethical|governance|societal|environment|mythological|sports|religion|business|international_relations|science_tech",
-      "content": "string",
-      "context": "optional string",
+      "content": "5-15 word headline of what this IS",
+      "verbatimText": "EXACT quote from essay - copy paste",
+      "context": "optional situational note",
+      "detailsMarkdown": "**Why it works:** ...\\n**Use for:** ...\\n**Pairs with:** ...",
       "quality": "high|medium|low",
       "isOverused": false,
-      "multiUse": true
+      "multiUse": true,
+      "sourcePageStart": 1,
+      "sourcePageEnd": 2,
+      "attribution": { "name": "...", "role": "...", "work": "...", "year": "..." }
     }
   ],
   "sections": [
-    {
-      "type": "introduction|conclusion|example|quote|thinker|argument|book_poem|keyword_phrase",
-      "markdown": "- bullet list of strongest items (max 6 bullets)",
-      "itemCount": 0
-    }
+    { "type": "introduction", "markdown": "- bullet summary", "itemCount": 0 }
   ],
   "essayTitle": "optional",
   "overallQuality": "high|medium|low",
   "totalItemsExtracted": 0,
   "extractionNotes": "optional",
-  "summary": {
-    "introductions": 0,
-    "conclusions": 0,
-    "examples": 0,
-    "quotes": 0,
-    "thinkers": 0,
-    "arguments": 0,
-    "booksPoems": 0,
-    "keywords": 0
-  }
+  "summary": { "introductions": 0, "conclusions": 0, "examples": 0, "quotes": 0, "thinkers": 0, "arguments": 0, "booksPoems": 0, "keywords": 0 }
 }
-No markdown, no extra text, no code fences.`;
+No markdown fences, no extra text.`;
 
 const SECTION_TO_CONTENT_TYPE: [RegExp, ContentType][] = [
 	[/\bintroductions?\b/i, "introduction"],
@@ -551,9 +556,18 @@ function convertToExtractedContent(
 	parameters: ExtractionParameters
 ): ExtractedContent {
 	// Re-assess quality and flags using our local functions
-	const qualityResult = calculateQuality(item.content, item.contentType);
-	const overused = isOverusedExample(item.content, parameters.overusedExamples);
-	const multiUse = assessMultiUse(item.content, item.contentType);
+	const qualityResult = calculateQuality(
+		item.verbatimText || item.content,
+		item.contentType
+	);
+	const overused = isOverusedExample(
+		item.verbatimText || item.content,
+		parameters.overusedExamples
+	);
+	const multiUse = assessMultiUse(
+		item.verbatimText || item.content,
+		item.contentType
+	);
 
 	return {
 		id: crypto.randomUUID(),
@@ -562,25 +576,99 @@ function convertToExtractedContent(
 		contentType: item.contentType,
 		exampleCategory: item.exampleCategory,
 		content: item.content,
+		verbatimText: item.verbatimText,
 		context: item.context,
+		detailsMarkdown: item.detailsMarkdown,
 		quality: qualityResult.quality,
 		isOverused: overused || item.isOverused,
 		multiUse: multiUse || item.multiUse,
 		themes: [], // Will be classified in a separate step
+		attribution: item.attribution,
+		sourcePageStart: item.sourcePageStart,
+		sourcePageEnd: item.sourcePageEnd,
 		createdAt: new Date().toISOString(),
 	};
 }
 
+/** Default concurrency for parallel extraction */
+const DEFAULT_CONCURRENCY = 3;
+
+/** Maximum concurrency to avoid rate limits */
+const MAX_CONCURRENCY = 5;
+
 /**
- * Extracts content from multiple essays in a batch.
+ * Extracts content from multiple essays in parallel batches.
  *
  * @param essays - Array of essay texts with boundaries
  * @param parameters - Extraction configuration
  * @param sourceRef - Source reference
  * @param onProgress - Progress callback
+ * @param concurrency - Number of parallel extractions (default: 3, max: 5)
  * @returns Array of extraction results per essay
  */
 export async function extractContentBatch(
+	essays: Array<{
+		text: string;
+		startPage: number;
+		endPage: number;
+		title?: string;
+	}>,
+	parameters: ExtractionParameters,
+	sourceRef: string,
+	onProgress?: (processed: number, total: number) => void,
+	concurrency: number = DEFAULT_CONCURRENCY
+): Promise<EssayExtractionResult[]> {
+	const effectiveConcurrency = Math.min(
+		Math.max(1, concurrency),
+		MAX_CONCURRENCY
+	);
+
+	// For small batches, use sequential processing
+	if (essays.length <= effectiveConcurrency) {
+		return extractContentSequential(essays, parameters, sourceRef, onProgress);
+	}
+
+	// Split essays into batches for parallel processing
+	const batches = splitIntoBatches(essays, effectiveConcurrency);
+	const results: EssayExtractionResult[] = new Array(essays.length);
+	let processedCount = 0;
+
+	// Process batches with controlled concurrency
+	for (const batch of batches) {
+		const batchPromises = batch.map(({ essay, originalIndex }) =>
+			extractSingleEssay(essay, originalIndex, parameters, sourceRef)
+		);
+
+		const batchResults = await Promise.allSettled(batchPromises);
+
+		// Process results and update progress
+		for (let i = 0; i < batchResults.length; i++) {
+			const result = batchResults[i];
+			const { essay, originalIndex } = batch[i];
+
+			if (result.status === "fulfilled") {
+				results[originalIndex] = result.value;
+			} else {
+				// Log error and create failed result
+				console.error(
+					`Failed to extract from essay ${originalIndex + 1}:`,
+					result.reason
+				);
+				results[originalIndex] = createFailedResult(essay);
+			}
+
+			processedCount++;
+			onProgress?.(processedCount, essays.length);
+		}
+	}
+
+	return results;
+}
+
+/**
+ * Sequential extraction for small batches or fallback.
+ */
+async function extractContentSequential(
 	essays: Array<{
 		text: string;
 		startPage: number;
@@ -597,50 +685,105 @@ export async function extractContentBatch(
 		const essay = essays[i];
 
 		try {
-			const { items, sections } = await extractContentFromEssay(
-				essay.text,
-				parameters,
-				sourceRef,
-				essay.title
-			);
-			const itemsWithMeta = items.map((item) => ({
-				...item,
-				essayTitle: essay.title,
-				essayIndex: i + 1,
-				essayStartPage: essay.startPage,
-				essayEndPage: essay.endPage,
-			}));
-
-			const wordCount = essay.text
-				.split(WORD_SPLIT_REGEX)
-				.filter(Boolean).length;
-
-			results.push({
-				essayTitle: essay.title,
-				startPage: essay.startPage,
-				endPage: essay.endPage,
-				items: itemsWithMeta,
-				sections,
-				overallQuality: calculateOverallQuality(items),
-				wordCount,
-			});
+			const result = await extractSingleEssay(essay, i, parameters, sourceRef);
+			results.push(result);
 		} catch (error) {
-			// Log error but continue with other essays
 			console.error(`Failed to extract from essay ${i + 1}:`, error);
-			results.push({
-				startPage: essay.startPage,
-				endPage: essay.endPage,
-				items: [],
-				sections: [],
-				overallQuality: "low",
-				wordCount: essay.text.split(WORD_SPLIT_REGEX).filter(Boolean).length,
-			});
+			results.push(createFailedResult(essay));
 		}
 
 		onProgress?.(i + 1, essays.length);
 	}
 
 	return results;
+}
+
+/**
+ * Extracts content from a single essay with metadata.
+ */
+async function extractSingleEssay(
+	essay: { text: string; startPage: number; endPage: number; title?: string },
+	essayIndex: number,
+	parameters: ExtractionParameters,
+	sourceRef: string
+): Promise<EssayExtractionResult> {
+	const { items, sections } = await extractContentFromEssay(
+		essay.text,
+		parameters,
+		sourceRef,
+		essay.title
+	);
+
+	const itemsWithMeta = items.map((item) => ({
+		...item,
+		essayTitle: essay.title,
+		essayIndex: essayIndex + 1,
+		essayStartPage: essay.startPage,
+		essayEndPage: essay.endPage,
+	}));
+
+	const wordCount = essay.text.split(WORD_SPLIT_REGEX).filter(Boolean).length;
+
+	return {
+		essayTitle: essay.title,
+		startPage: essay.startPage,
+		endPage: essay.endPage,
+		items: itemsWithMeta,
+		sections,
+		overallQuality: calculateOverallQuality(items),
+		wordCount,
+	};
+}
+
+/**
+ * Creates a failed result placeholder for an essay.
+ */
+function createFailedResult(essay: {
+	text: string;
+	startPage: number;
+	endPage: number;
+	title?: string;
+}): EssayExtractionResult {
+	return {
+		essayTitle: essay.title,
+		startPage: essay.startPage,
+		endPage: essay.endPage,
+		items: [],
+		sections: [],
+		overallQuality: "low",
+		wordCount: essay.text.split(WORD_SPLIT_REGEX).filter(Boolean).length,
+	};
+}
+
+/**
+ * Splits essays into batches for parallel processing.
+ * Each batch contains up to `batchSize` essays that will be processed concurrently.
+ */
+function splitIntoBatches(
+	essays: Array<{
+		text: string;
+		startPage: number;
+		endPage: number;
+		title?: string;
+	}>,
+	concurrency: number
+): Array<Array<{ essay: (typeof essays)[number]; originalIndex: number }>> {
+	const batches: Array<
+		Array<{ essay: (typeof essays)[number]; originalIndex: number }>
+	> = [];
+
+	// Create indexed essays
+	const indexedEssays = essays.map((essay, index) => ({
+		essay,
+		originalIndex: index,
+	}));
+
+	// Split into batches of size `concurrency`
+	for (let i = 0; i < indexedEssays.length; i += concurrency) {
+		batches.push(indexedEssays.slice(i, i + concurrency));
+	}
+
+	return batches;
 }
 
 /**
