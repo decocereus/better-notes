@@ -4,11 +4,37 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
+**Extraction Quality & Parallelization** ✅ - Few-shot prompts + parallel batch processing
 **Extracted Content Browser UI Redesign** ✅ - Scholarly aesthetic with collapsible hierarchy
 **Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
 **Patterns Library UX + Re-extract** ✅ - Markdown highlights, clearer cards, re-extract from OCR
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 159 passing
+
+---
+
+## Extraction Quality & Parallelization (2026-01-27) - Complete
+
+**Problem:** Extraction output had poor field usage (field names as content, usage guidance in wrong fields) and sequential processing was slow for 200-500+ essays.
+
+**Solution:** Two-phase fix: (1) Add few-shot examples to prompts showing correct vs incorrect output, (2) Add parallel batch processing with Promise.allSettled.
+
+### Phase 1: Prompt Improvements
+- Added concrete few-shot examples showing CORRECT field usage
+- Added WRONG examples to prevent common mistakes
+- Clarified field purposes: content = headline, verbatimText = exact quote, detailsMarkdown = usage guidance
+- Reinforced quality-over-quantity principle
+
+### Phase 2: Parallel Processing
+- `extractContentBatch()` now processes essays in parallel batches
+- Default concurrency: 3, max: 5 (to avoid rate limits)
+- Uses `Promise.allSettled` for partial success handling
+- Falls back to sequential for small batches
+- Maintains result ordering despite parallel execution
+
+### Files Modified
+- `lib/llm/prompts/extraction.ts` - Few-shot examples in system prompt
+- `lib/extraction/content-extractor.ts` - Parallel batch processing
 
 ---
 

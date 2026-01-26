@@ -19,6 +19,20 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-27 - Few-Shot Examples Fix LLM Field Confusion
+
+**Context:** LLM was outputting field names as content ("detailsMarkdown") and putting usage guidance in wrong fields
+**Problem:** Prompt described fields but didn't show concrete examples of correct vs incorrect output
+**Solution:** Added few-shot examples in JSON showing exactly what goes in each field, plus WRONG examples showing what NOT to do
+**Lesson:** LLMs need to SEE what correct output looks like, not just read descriptions. Always include both correct AND incorrect examples when field confusion is possible.
+
+### 2026-01-27 - Promise.allSettled for Partial Success in Batch Processing
+
+**Context:** Processing 200-500+ essays, some may fail due to transient errors
+**Problem:** `Promise.all` fails fast - one error cancels all other promises
+**Solution:** Use `Promise.allSettled` which waits for all promises and returns status for each (fulfilled/rejected)
+**Lesson:** For batch operations where partial success is acceptable, use `Promise.allSettled` and handle each result individually. This prevents one bad essay from blocking 499 good ones.
+
 ### 2026-01-27 - MessageResponse Children vs Content Prop
 
 **Context:** Using ai-elements MessageResponse for markdown rendering in extracted content browser
