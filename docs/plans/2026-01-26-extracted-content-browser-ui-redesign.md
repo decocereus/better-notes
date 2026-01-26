@@ -1,7 +1,7 @@
 # Extracted Content Browser UI Redesign
 
 **Date:** 2026-01-26
-**Status:** Approved
+**Status:** Implemented
 **File:** `components/extracted-content-browser.tsx`
 
 ## Problem
@@ -140,10 +140,10 @@ None new - uses existing:
 - `@/components/ui/button`
 
 ### Checklist
-- [ ] Add Collapsible to ContentTypeSection
-- [ ] Rewrite ContentItem with collapsed/expanded states
-- [ ] Integrate MessageResponse for detailsMarkdown
-- [ ] Update spacing classes throughout
-- [ ] Replace text badges with dot/icon indicators
+- [x] Add Collapsible to ContentTypeSection
+- [x] Rewrite ContentItem with collapsed/expanded states
+- [x] Integrate MessageResponse for detailsMarkdown
+- [x] Update spacing classes throughout
+- [x] Replace text badges with dot/icon indicators
 - [ ] Test with real extraction data
-- [ ] Run `bun run check` to verify no errors
+- [x] Run `bun run check` to verify no errors

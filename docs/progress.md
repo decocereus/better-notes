@@ -4,10 +4,30 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
+**Extracted Content Browser UI Redesign** ✅ - Scholarly aesthetic with collapsible hierarchy
 **Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
 **Patterns Library UX + Re-extract** ✅ - Markdown highlights, clearer cards, re-extract from OCR
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 159 passing
+
+---
+
+## Extracted Content Browser UI Redesign (2026-01-27) - Complete
+
+**Problem:** The extracted content browser was cramped, markdown wasn't rendering properly, and metadata badges cluttered the view with repetitive text labels.
+
+**Solution:** Complete UI redesign with scholarly/editorial aesthetic featuring three-level collapsible hierarchy and proper markdown rendering.
+
+### Changes
+- Three-level collapsible hierarchy: Essays → Content Type Sections → Individual Items
+- Markdown rendering via ai-elements `MessageResponse` (Streamdown)
+- Generous spacing with `space-y-6` between essays, `py-4` between items
+- Blockquote styling for verbatim text with left border accent
+- Subtle metadata indicators: colored dots for quality, small icons for multi-use/overused
+- shadcn `Collapsible` components with `Button` triggers throughout
+
+### Files Modified
+- `components/extracted-content-browser.tsx` - Complete rewrite
 
 ---
 

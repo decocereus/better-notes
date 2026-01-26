@@ -19,6 +19,20 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-27 - MessageResponse Children vs Content Prop
+
+**Context:** Using ai-elements MessageResponse for markdown rendering in extracted content browser
+**Problem:** Initially tried `<MessageResponse content={item.detailsMarkdown} />` which didn't work
+**Solution:** Pass markdown as children: `<MessageResponse>{item.detailsMarkdown}</MessageResponse>`
+**Lesson:** MessageResponse uses Streamdown which accepts children, not a content prop. Check component props in the source file.
+
+### 2026-01-27 - Three-Level Collapsible Hierarchy Pattern
+
+**Context:** Building a content browser with essays → content types → items hierarchy
+**Problem:** Needed independent collapse state at each level without prop drilling
+**Solution:** Each level manages its own `useState(true/false)` for collapse state. Parent levels default open, leaf items default closed.
+**Lesson:** For multi-level collapsible UIs, let each level own its state. Use shadcn Collapsible with Button triggers for consistent accessibility.
+
 ### 2026-01-26 - JSON + Markdown Hybrid for Extraction UX
 
 **Context:** Pattern cards were unclear and model output drifted into metadata-only lines.
