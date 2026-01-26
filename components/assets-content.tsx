@@ -92,7 +92,7 @@ export function AssetsContent() {
 		if (!(projectId && projects)) {
 			return undefined;
 		}
-		const project = projects.find((p) => p.id === projectId);
+		const project = projects.find((p) => p.id.toString() === projectId);
 		return project?.name;
 	};
 

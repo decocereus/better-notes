@@ -40,9 +40,52 @@ export interface PdfConversionResult {
  * Response from the converter service.
  */
 interface ConverterResponse {
-	success: boolean;
-	totalPages: number;
-	errors: string[];
+	status: "started";
+	message: string;
+}
+
+interface WaitForConversionOptions {
+	maxWaitMs?: number;
+	pollIntervalMs?: number;
+	onProgress?: (converted: number, total: number) => void;
+}
+
+const DEFAULT_POLL_INTERVAL_MS = 10_000;
+const DEFAULT_MAX_WAIT_MS = 4 * 60 * 60 * 1000;
+
+function sleep(durationMs: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, durationMs);
+	});
+}
+
+async function waitForConversionCompletion(
+	assetId: string,
+	options: WaitForConversionOptions = {}
+): Promise<ConversionStatus> {
+	const {
+		maxWaitMs = DEFAULT_MAX_WAIT_MS,
+		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+		onProgress,
+	} = options;
+	const startTime = Date.now();
+	const { getConversionStatus } = await import("@/lib/storage/page-images");
+
+	while (Date.now() - startTime < maxWaitMs) {
+		const status = await getConversionStatus(assetId);
+
+		if (status) {
+			onProgress?.(status.pagesProcessed, status.totalPages);
+
+			if (status.status === "completed" || status.status === "failed") {
+				return status;
+			}
+		}
+
+		await sleep(pollIntervalMs);
+	}
+
+	throw new Error("PDF conversion timed out while waiting for completion");
 }
 
 /**
@@ -98,6 +141,8 @@ export async function convertPdfToImages(
 	const response = await fetch(`${converterUrl}/convert`, {
 		method: "POST",
 		headers,
+		// Converter should respond immediately; short timeout avoids hanging.
+		signal: AbortSignal.timeout(30 * 1000),
 		body: JSON.stringify({
 			assetId,
 			sourceKey,
@@ -117,20 +162,21 @@ export async function convertPdfToImages(
 	}
 
 	const result = (await response.json()) as ConverterResponse;
-	console.log(
-		`[PDF] Conversion complete: ${result.totalPages} pages, ${result.errors.length} errors`
-	);
+	console.log(`[PDF] Converter accepted job: ${result.status}`);
 
-	// Call progress callback with final state
-	if (onProgress && result.totalPages > 0) {
-		onProgress(result.totalPages, result.totalPages);
-	}
+	const finalStatus = await waitForConversionCompletion(assetId, {
+		onProgress,
+	});
+
+	const errors = finalStatus.error
+		? finalStatus.error.split("; ").filter(Boolean)
+		: [];
 
 	return {
-		success: result.success,
-		totalPages: result.totalPages,
-		convertedPages: result.totalPages - result.errors.length,
-		errors: result.errors,
+		success: finalStatus.status === "completed",
+		totalPages: finalStatus.totalPages,
+		convertedPages: finalStatus.pagesProcessed,
+		errors,
 	};
 }
 

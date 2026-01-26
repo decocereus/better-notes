@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -64,12 +64,12 @@ export function AssignAssetDialog({
 	};
 
 	// Reset selection when asset changes
-	if (
-		asset &&
-		selectedProject !== (asset.projectId?.toString() || "unassigned")
-	) {
+	useEffect(() => {
+		if (!(asset && open)) {
+			return;
+		}
 		setSelectedProject(asset.projectId?.toString() || "unassigned");
-	}
+	}, [asset, open]);
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>

@@ -125,6 +125,27 @@ async function updateAssetExtractionStatus(
 		id: assetId as never,
 		status: "extraction_processing",
 		extractionJobId: jobId,
+		lastError: "",
+	});
+}
+
+async function updateAssetExtractionFailure(
+	assetId: string,
+	errorMessage: string
+): Promise<void> {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return;
+	}
+
+	const { ConvexHttpClient } = await import("convex/browser");
+	const { api } = await import("@/convex/_generated/api");
+	const convex = new ConvexHttpClient(convexUrl);
+
+	await convex.mutation(api.assets.updateStatus, {
+		id: assetId as never,
+		status: "extraction_failed",
+		lastError: errorMessage,
 	});
 }
 
@@ -194,6 +215,14 @@ export async function POST(request: NextRequest) {
 		).catch((error) => {
 			console.error(`Extraction job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
+			if (assetId) {
+				updateAssetExtractionFailure(
+					assetId,
+					error instanceof Error ? error.message : "Unknown error"
+				).catch(() => {
+					// Silently ignore failure update errors
+				});
+			}
 		});
 
 		return NextResponse.json(

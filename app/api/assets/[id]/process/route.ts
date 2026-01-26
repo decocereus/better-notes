@@ -52,10 +52,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 		}
 
 		// Check if already processing
-		if (
+		const isProcessing =
 			asset.processingStatus === "ocr_processing" ||
-			asset.processingStatus === "extraction_processing"
-		) {
+			asset.processingStatus === "extraction_processing";
+		const hasStaleError = Boolean(asset.lastError);
+		if (isProcessing && !hasStaleError) {
 			return NextResponse.json(
 				{ error: "Asset is already being processed" },
 				{ status: 400 }
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 		await convex.mutation(api.assets.updateStatus, {
 			id: assetId as Id<"assets">,
 			status: "ocr_queued",
+			lastError: "",
 		});
 
 		log.info(`Starting processing pipeline for asset ${assetId}`);
@@ -103,6 +105,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 			id: assetId as Id<"assets">,
 			status: "ocr_processing",
 			ocrJobId: ocrData.jobId,
+			lastError: "",
 		});
 
 		log.info(`OCR job ${ocrData.jobId} started for asset ${assetId}`);

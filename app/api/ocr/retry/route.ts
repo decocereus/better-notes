@@ -53,7 +53,8 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json(
 				{
 					error: "Claude not configured",
-					details: "ANTHROPIC_API_KEY is required for retry",
+					details:
+						"Retry requires a Claude provider (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)",
 				},
 				{ status: 503 }
 			);

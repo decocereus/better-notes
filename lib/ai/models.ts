@@ -5,6 +5,22 @@
 
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
+import { getAIClient } from "@/lib/ai/client";
+import { env } from "@/lib/env";
+
+const OPENROUTER_MODELS = {
+	geminiFlash: "google/gemini-2.0-flash-001",
+	claudeSonnet: "anthropic/claude-sonnet-4",
+} as const;
+
+const DIRECT_MODELS = {
+	geminiFlash: "gemini-2.0-flash-001",
+	claudeSonnet: "claude-sonnet-4-20250514",
+} as const;
+
+function shouldUseOpenRouter(): boolean {
+	return Boolean(env.OPENROUTER_API_KEY);
+}
 
 /**
  * OCR model types.
@@ -16,7 +32,10 @@ export type OcrModelType = "gemini-flash" | "claude-sonnet";
  * Fast and cost-effective for bulk processing.
  */
 export function getGeminiFlashModel() {
-	return google("gemini-2.0-flash-001");
+	if (shouldUseOpenRouter()) {
+		return getAIClient()(OPENROUTER_MODELS.geminiFlash);
+	}
+	return google(DIRECT_MODELS.geminiFlash);
 }
 
 /**
@@ -24,7 +43,10 @@ export function getGeminiFlashModel() {
  * Higher quality for difficult pages.
  */
 export function getClaudeSonnetModel() {
-	return anthropic("claude-sonnet-4-20250514");
+	if (shouldUseOpenRouter()) {
+		return getAIClient()(OPENROUTER_MODELS.claudeSonnet);
+	}
+	return anthropic(DIRECT_MODELS.claudeSonnet);
 }
 
 /**
@@ -49,15 +71,16 @@ export function validateOcrModelConfig(): {
 	claudeAvailable: boolean;
 	error?: string;
 } {
+	const openRouterKey = env.OPENROUTER_API_KEY;
 	const geminiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 	const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
 	return {
-		geminiAvailable: Boolean(geminiKey),
-		claudeAvailable: Boolean(anthropicKey),
+		geminiAvailable: Boolean(openRouterKey || geminiKey),
+		claudeAvailable: Boolean(openRouterKey || anthropicKey),
 		error:
-			geminiKey || anthropicKey
+			openRouterKey || geminiKey || anthropicKey
 				? undefined
-				: "No OCR model API keys configured (GOOGLE_GENERATIVE_AI_API_KEY or ANTHROPIC_API_KEY)",
+				: "No OCR model API keys configured (OPENROUTER_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, or ANTHROPIC_API_KEY)",
 	};
 }

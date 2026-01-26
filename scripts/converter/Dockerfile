@@ -12,16 +12,19 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy package files
-COPY package.json bun.lock ./
+COPY package.json ./
 
-# Install dependencies (using npm since bun isn't in base image)
-RUN npm install --production
+# Install dependencies (dev deps included for TypeScript build)
+RUN npm install
 
 # Copy converter source
 COPY convert.ts tsconfig.json ./
 
 # Build TypeScript
-RUN npx tsc
+RUN npm run build
+
+# Prune dev dependencies for a smaller image
+RUN npm prune --production
 
 # Expose port
 EXPOSE 3000

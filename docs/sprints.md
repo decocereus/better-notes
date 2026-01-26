@@ -1939,7 +1939,7 @@ async function processOcrJob(jobId: string, sourceKey: string) {
 
 ---
 
-## Sprint 9: Content Extraction Engine
+## Sprint 9: Content Extraction Engine ✅ COMPLETED
 
 **Goal:** Extract structured content (intros, examples, quotes, etc.) from OCR'd text.
 
@@ -2303,14 +2303,16 @@ export async function POST(request: NextRequest) {
 
 ---
 
-### Sprint 9 Completion Criteria
-- [ ] Essay boundaries detected correctly
-- [ ] All content types extracted
-- [ ] Quality scoring works
-- [ ] Overused examples flagged
-- [ ] Parameters configurable via UI
-- [ ] Extracted content browsable
-- [ ] All tests passing
+### Sprint 9 Completion Criteria ✅ COMPLETED
+- [x] Essay boundaries detected correctly
+- [x] All content types extracted
+- [x] Quality scoring works
+- [x] Overused examples flagged
+- [x] Parameters configurable via UI
+- [x] Extracted content browsable
+- [x] Markdown highlights rendered (ai-elements)
+- [x] Re-extract from OCR without reprocessing PDFs
+- [ ] All tests passing (not verified in this update)
 
 ---
 

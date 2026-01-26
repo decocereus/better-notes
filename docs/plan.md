@@ -103,6 +103,18 @@ For 190MB+ topper PDFs, R2 provides better streaming, signed URLs for secure acc
   - **Keywords & Phrases**: Multi-use phrases for revision
 - Flag overused examples (Gandhi, Buddha, Ashoka, Mandela)
 - Store all extracted content in Notion with theme classifications
+- Extraction output is JSON for structure, plus markdown summaries per content type for UX
+  - JSON remains the source of truth for filters, counts, and grouping
+  - Markdown is rendered in the UI for "Highlights" per content type
+
+#### Patterns Library UX (Topper Patterns page)
+- Grouped by content type with:
+  - Highlights (markdown summary rendered via ai-elements)
+  - Item cards showing snippet, usage context, quality, multi-use/overused
+  - Source + essay badges for traceability
+- Re-extract action:
+  - Pick a PDF with existing OCR results to rerun extraction only
+  - Useful after prompt/schema changes without re-OCR
 
 ### 3. Content Classification (Auto)
 - User mentions Notion page URL → system fetches content
@@ -554,6 +566,7 @@ better-notes/
 5. **R2 Upload**: Upload 190MB PDF → Stream to R2 → Get signed URL
 6. **OCR**: Process PDF pages → Show extracted text per page
 7. **Pattern Extraction**: Analyze topper essays → Display structured content
+   - Includes per-type markdown highlights rendered via ai-elements
 8. **Classification**: Classify content → Show theme mappings → User review
 9. **Comparison**: Select theme → See user vs topper content → Gap analysis
 10. **Note Generation**: Generate dual-section notes → Preview → Sync to Notion
@@ -582,12 +595,14 @@ better-notes/
 - [x] Processing job management with R2 persistence
 - [x] OCR results viewer with search and export
 
-#### Sprint 9: Content Extraction Engine (NEXT)
-- [ ] Essay boundary detection
-- [ ] Structured content extraction (intros, examples, quotes, etc.)
-- [ ] Extraction parameters UI (configurable)
-- [ ] Quality scoring and overused flagging
-- [ ] Extracted content browser
+#### Sprint 9: Content Extraction Engine (COMPLETED)
+- [x] Essay boundary detection
+- [x] Structured content extraction (intros, examples, quotes, etc.)
+- [x] Extraction parameters UI (configurable)
+- [x] Quality scoring and overused flagging
+- [x] Extracted content browser
+- [x] Markdown highlights per content type (ai-elements)
+- [x] Re-extract action (rerun extraction from OCR without reprocessing PDFs)
 
 #### Sprint 10: Theme Classification
 - [ ] Classification prompts and schemas

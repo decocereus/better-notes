@@ -75,6 +75,21 @@ export interface ExtractedContent {
 
 	createdAt: string;
 	updatedAt?: string;
+
+	/** Optional essay metadata for better UI grouping */
+	essayTitle?: string;
+	essayIndex?: number;
+	essayStartPage?: number;
+	essayEndPage?: number;
+}
+
+/**
+ * Markdown summary for a content type.
+ */
+export interface ExtractionSection {
+	type: ContentType;
+	markdown: string;
+	itemCount?: number;
 }
 
 /**
@@ -138,6 +153,7 @@ export interface EssayExtractionResult {
 	startPage: number;
 	endPage: number;
 	items: ExtractedContent[];
+	sections?: ExtractionSection[];
 	overallQuality: ContentQuality;
 	wordCount: number;
 }

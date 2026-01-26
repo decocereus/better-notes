@@ -72,6 +72,11 @@ interface ConvertResponse {
 	errors: string[];
 }
 
+interface ConvertStartResponse {
+	status: "started";
+	message: string;
+}
+
 /**
  * Parse JSON body from request.
  */
@@ -328,6 +333,7 @@ async function runConversionPipeline(
 	console.log(`[Converter] Converting PDF (dpi=${dpi}, quality=${quality})`);
 	const totalPages = await convertPdf(pdfPath, outputDir, dpi, quality);
 	status.totalPages = totalPages;
+	await updateStatus(assetId, status);
 	console.log(`[Converter] Converted ${totalPages} pages`);
 
 	// Upload pages and collect errors
@@ -354,6 +360,41 @@ async function runConversionPipeline(
 }
 
 /**
+ * Start conversion in the background and return immediately.
+ */
+async function startConversionInBackground(
+	assetId: string,
+	sourceKey: string,
+	dpi: number,
+	quality: number
+): Promise<void> {
+	const tempDir = join(tmpdir(), `convert-${assetId}-${Date.now()}`);
+	await mkdir(tempDir, { recursive: true });
+
+	try {
+		await runConversionPipeline(assetId, sourceKey, dpi, quality, tempDir);
+	} catch (err) {
+		const errorMsg = err instanceof Error ? err.message : "Unknown error";
+		console.error(`[Converter] Conversion failed: ${errorMsg}`);
+
+		const status: ConversionStatus = {
+			status: "failed",
+			pagesProcessed: 0,
+			totalPages: 0,
+			error: errorMsg,
+			completedAt: new Date().toISOString(),
+		};
+		await updateStatus(assetId, status);
+	} finally {
+		try {
+			await rm(tempDir, { recursive: true, force: true });
+		} catch {
+			console.warn(`[Converter] Failed to cleanup temp dir: ${tempDir}`);
+		}
+	}
+}
+
+/**
  * Handle POST /convert request.
  */
 async function handleConvert(
@@ -370,42 +411,14 @@ async function handleConvert(
 	}
 
 	console.log(`[Converter] Starting conversion for asset ${assetId}`);
+	sendJson<ConvertStartResponse>(res, 202, {
+		status: "started",
+		message: "Conversion started",
+	});
 
-	// Create temp directory
-	const tempDir = join(tmpdir(), `convert-${assetId}-${Date.now()}`);
-	await mkdir(tempDir, { recursive: true });
-
-	try {
-		const response = await runConversionPipeline(
-			assetId,
-			sourceKey,
-			dpi,
-			quality,
-			tempDir
-		);
-		sendJson(res, 200, response);
-	} catch (err) {
-		const errorMsg = err instanceof Error ? err.message : "Unknown error";
-		console.error(`[Converter] Conversion failed: ${errorMsg}`);
-
-		const status: ConversionStatus = {
-			status: "failed",
-			pagesProcessed: 0,
-			totalPages: 0,
-			error: errorMsg,
-			completedAt: new Date().toISOString(),
-		};
-		await updateStatus(assetId, status);
-
-		sendJson(res, 500, { error: errorMsg });
-	} finally {
-		// Cleanup temp directory
-		try {
-			await rm(tempDir, { recursive: true, force: true });
-		} catch {
-			console.warn(`[Converter] Failed to cleanup temp dir: ${tempDir}`);
-		}
-	}
+	startConversionInBackground(assetId, sourceKey, dpi, quality).catch(() => {
+		// Fire and forget - errors handled inside
+	});
 }
 
 /**

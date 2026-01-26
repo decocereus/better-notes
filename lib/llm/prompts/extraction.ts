@@ -187,7 +187,12 @@ Extract all valuable content following the system guidelines. For each item:
 3. Provide context if helpful
 4. Assess quality
 5. Flag if overused
-6. Note if multi-use applicable`;
+6. Note if multi-use applicable
+
+Also provide a short markdown summary per content type:
+- Use a bullet list
+- Max 6 bullets per section
+- Keep it concise and reusable`;
 }
 
 /**

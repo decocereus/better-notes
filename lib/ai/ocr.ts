@@ -263,7 +263,9 @@ export async function retryPagesWithClaude(
 ): Promise<{ success: boolean; pagesRetried: number; errors: string[] }> {
 	const config = validateOcrModelConfig();
 	if (!config.claudeAvailable) {
-		throw new Error("ANTHROPIC_API_KEY not configured for retry");
+		throw new Error(
+			"No Claude provider configured for retry (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)"
+		);
 	}
 
 	const pageUrls = await getAllPageImageUrls(assetId);

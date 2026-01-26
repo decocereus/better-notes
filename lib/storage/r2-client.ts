@@ -3,6 +3,7 @@
  * R2 provides better performance and cost for large files compared to Vercel Blob.
  */
 
+import { Readable } from "node:stream";
 import {
 	DeleteObjectCommand,
 	GetObjectCommand,
@@ -108,6 +109,33 @@ export async function uploadToR2(
 }
 
 /**
+ * Converts an S3 response body to a ReadableStream.
+ */
+function convertToReadableStream(responseBody: unknown): ReadableStream {
+	// Check if it's already a ReadableStream
+	if (typeof (responseBody as ReadableStream).getReader === "function") {
+		return responseBody as ReadableStream;
+	}
+
+	// Handle Node.js Readable stream
+	if (responseBody instanceof Readable) {
+		return Readable.toWeb(responseBody) as ReadableStream;
+	}
+
+	// Handle Uint8Array
+	if (responseBody instanceof Uint8Array) {
+		return new ReadableStream({
+			start(controller) {
+				controller.enqueue(responseBody);
+				controller.close();
+			},
+		});
+	}
+
+	throw new Error("Unsupported response body type");
+}
+
+/**
  * Downloads a file from R2.
  */
 export async function downloadFromR2(
@@ -127,8 +155,10 @@ export async function downloadFromR2(
 		throw new Error(`File not found: ${key}`);
 	}
 
+	const body = convertToReadableStream(response.Body);
+
 	return {
-		body: response.Body as ReadableStream,
+		body,
 		contentType: response.ContentType,
 		size: response.ContentLength,
 	};

@@ -72,7 +72,7 @@ export interface AssetStats {
 export interface ExtractionResultMetadata {
 	id: Id<"extractionResults">;
 	assetId: Id<"assets">;
-	ocrJobId: string;
+	ocrJobId?: string;
 	extractionJobId: string;
 	totalEssays: number;
 	totalItems: number;

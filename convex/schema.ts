@@ -99,7 +99,7 @@ export default defineSchema({
 	// Extraction results metadata (full results stored in R2)
 	extractionResults: defineTable({
 		assetId: v.id("assets"),
-		ocrJobId: v.string(),
+		ocrJobId: v.optional(v.string()),
 		extractionJobId: v.string(),
 		totalEssays: v.number(),
 		totalItems: v.number(),

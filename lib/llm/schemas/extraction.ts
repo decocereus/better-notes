@@ -103,10 +103,31 @@ export const ExtractedItemSchema = z.object({
 export type ExtractedItem = z.infer<typeof ExtractedItemSchema>;
 
 /**
+ * Schema for markdown summaries per content type.
+ */
+export const ExtractionSectionSchema = z.object({
+	type: ContentTypeSchema.describe("Content type for this section"),
+	markdown: z
+		.string()
+		.min(1)
+		.describe("Markdown list summarizing the strongest items for this type"),
+	itemCount: z
+		.number()
+		.optional()
+		.describe("Optional item count represented in this section"),
+});
+
+export type ExtractionSection = z.infer<typeof ExtractionSectionSchema>;
+
+/**
  * Schema for the complete extraction result from an essay.
  */
 export const ExtractionResultSchema = z.object({
 	items: z.array(ExtractedItemSchema).describe("All extracted content items"),
+	sections: z
+		.array(ExtractionSectionSchema)
+		.optional()
+		.describe("Markdown summaries grouped by content type"),
 
 	essayTitle: z.string().optional().describe("Inferred or stated essay title"),
 

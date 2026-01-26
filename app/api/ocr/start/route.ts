@@ -36,9 +36,20 @@ async function updateAssetStatus(
 		const { api } = await import("@/convex/_generated/api");
 		const convex = new ConvexHttpClient(convexUrl);
 
+		const shouldClearError =
+			status.endsWith("_processing") || status.endsWith("_queued");
+
+		let lastErrorValue: string | undefined;
+		if (additionalFields && "lastError" in additionalFields) {
+			lastErrorValue = additionalFields.lastError as string | undefined;
+		} else if (shouldClearError) {
+			lastErrorValue = "";
+		}
+
 		await convex.mutation(api.assets.updateStatus, {
 			id: assetId as never,
 			status: status as never,
+			lastError: lastErrorValue,
 			...additionalFields,
 		});
 

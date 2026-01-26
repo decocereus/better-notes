@@ -4,7 +4,7 @@
  * Uses LLM to identify essay boundaries based on content patterns.
  */
 
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/ai/client";
 import type { EssayBoundary } from "@/types/extraction";
@@ -80,6 +80,105 @@ When pages are connected (same essay spans multiple pages):
 Output accurate page boundaries for each distinct essay.`;
 
 /**
+ * JSON-only instruction for fallback parsing.
+ */
+const ESSAY_BOUNDARY_JSON_INSTRUCTIONS = `Return ONLY valid JSON that matches this shape:
+{
+  "essays": [
+    {
+      "startPage": 1,
+      "endPage": 3,
+      "title": "optional title",
+      "estimatedWordCount": 1200,
+      "confidence": 0.0
+    }
+  ],
+  "totalEssays": 1,
+  "notes": "optional"
+}
+No markdown, no extra text, no code fences.`;
+
+function extractJsonObject(text: string): unknown {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start === -1 || end === -1 || end <= start) {
+		throw new Error("No JSON object found in model response");
+	}
+	const jsonText = text.slice(start, end + 1);
+	return JSON.parse(jsonText);
+}
+
+const PAGE_RANGE_REGEX = /Pages?:\s*(\d+)\s*-\s*(\d+)/gi;
+const TITLE_REGEX = /Essay\s+\d+:\s*[""]([^""]+)[""]/i;
+const SMART_QUOTES_TITLE_REGEX = /[""]([^""]+)[""]/;
+const WORD_COUNT_REGEX = /Word\s*count[^0-9]*([\d,]+)/i;
+
+function parseEssayBoundariesFromText(
+	text: string,
+	ocrResults: OcrPageResult[]
+): EssayBoundaryResponse | null {
+	const matches = Array.from(text.matchAll(PAGE_RANGE_REGEX));
+	if (matches.length === 0) {
+		return null;
+	}
+
+	const pageWordCounts = new Map<number, number>();
+	for (const result of ocrResults) {
+		pageWordCounts.set(result.pageNumber, result.wordCount);
+	}
+
+	const essays = matches
+		.map((match) => {
+			const startPage = Number.parseInt(match[1], 10);
+			const endPage = Number.parseInt(match[2], 10);
+
+			if (Number.isNaN(startPage) || Number.isNaN(endPage)) {
+				return null;
+			}
+
+			const snippetStart = Math.max(0, (match.index ?? 0) - 200);
+			const snippetEnd = Math.min(text.length, (match.index ?? 0) + 200);
+			const snippet = text.slice(snippetStart, snippetEnd);
+
+			const titleMatch =
+				snippet.match(TITLE_REGEX) ?? snippet.match(SMART_QUOTES_TITLE_REGEX);
+			const wordCountMatch = snippet.match(WORD_COUNT_REGEX);
+
+			let estimatedWordCount = 0;
+			for (let page = startPage; page <= endPage; page++) {
+				estimatedWordCount += pageWordCounts.get(page) ?? 0;
+			}
+
+			if (wordCountMatch) {
+				const parsed = Number.parseInt(wordCountMatch[1].replace(/,/g, ""), 10);
+				if (!Number.isNaN(parsed)) {
+					estimatedWordCount = parsed;
+				}
+			}
+
+			return {
+				startPage,
+				endPage,
+				title: titleMatch?.[1]?.trim(),
+				estimatedWordCount,
+				confidence: 0.5,
+			};
+		})
+		.filter((essay) => essay !== null)
+		.filter((essay) => essay.endPage >= essay.startPage);
+
+	if (essays.length === 0) {
+		return null;
+	}
+
+	return {
+		essays,
+		totalEssays: essays.length,
+		notes: "Parsed from non-JSON model response",
+	};
+}
+
+/**
  * Creates the user prompt with OCR text for boundary detection.
  */
 function createBoundaryDetectionPrompt(ocrResults: OcrPageResult[]): string {
@@ -133,14 +232,50 @@ export async function detectEssayBoundaries(
 	const model = getModel("EXTRACTION");
 	const prompt = createBoundaryDetectionPrompt(ocrResults);
 
-	const result = await generateObject({
-		model,
-		schema: EssayBoundarySchema,
-		system: ESSAY_BOUNDARY_SYSTEM_PROMPT,
-		prompt,
-	});
+	try {
+		const result = await generateObject({
+			model,
+			schema: EssayBoundarySchema,
+			system: ESSAY_BOUNDARY_SYSTEM_PROMPT,
+			prompt,
+		});
 
-	return convertToBoundaries(result.object, ocrResults);
+		return convertToBoundaries(result.object, ocrResults);
+	} catch (error) {
+		console.warn(
+			"[EssayDetector] Structured output failed, attempting JSON fallback",
+			error
+		);
+
+		const fallback = await generateText({
+			model,
+			system: `${ESSAY_BOUNDARY_SYSTEM_PROMPT}\n\n${ESSAY_BOUNDARY_JSON_INSTRUCTIONS}`,
+			prompt,
+		});
+
+		try {
+			const parsedJson = extractJsonObject(fallback.text);
+			const parsed = EssayBoundarySchema.safeParse(parsedJson);
+			if (!parsed.success) {
+				throw new Error(parsed.error.message);
+			}
+			return convertToBoundaries(parsed.data, ocrResults);
+		} catch (parseError) {
+			const parsedFreeform = parseEssayBoundariesFromText(
+				fallback.text,
+				ocrResults
+			);
+			if (!parsedFreeform) {
+				throw new Error(
+					`Failed to parse essay boundaries JSON: ${
+						parseError instanceof Error ? parseError.message : "Unknown error"
+					}`
+				);
+			}
+
+			return convertToBoundaries(parsedFreeform, ocrResults);
+		}
+	}
 }
 
 /**

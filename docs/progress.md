@@ -5,8 +5,24 @@ Track completed work, current status, and next steps.
 ## Current Status
 
 **Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
+**Patterns Library UX + Re-extract** ✅ - Markdown highlights, clearer cards, re-extract from OCR
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 159 passing
+
+---
+
+## Patterns Library UX + Markdown Summaries (2026-01-26) - Complete
+
+**Problem:** Pattern cards were unclear and sometimes contained metadata lines as items. The UI lacked context, and there was no easy way to rerun extraction after prompt/schema tweaks.
+
+**Solution:** Keep JSON as the source of truth, add markdown summaries per content type for UX, and render highlights via ai-elements. Added a re-extract dialog that reruns extraction using existing OCR.
+
+### Updates
+- Extraction output includes `sections[]` with markdown summaries per content type.
+- Patterns page renders “Highlights” per type using ai-elements `MessageResponse`.
+- Cards show snippet + usage context, plus source and essay badges.
+- Re-extract dialog on `/patterns` to rerun extraction without re-OCR.
+- `/api/patterns?includeItems=false` provides a lightweight summary for other pages.
 
 ---
 

@@ -21,6 +21,53 @@ import type {
 
 /** In-memory cache for active jobs (server-side only) */
 const activeJobsCache = new Map<string, ProcessingJob>();
+const jobPersistQueue = new Map<string, Promise<void>>();
+const jobPersistLast = new Map<string, number>();
+
+const JOB_PERSIST_MIN_INTERVAL_MS = 1500;
+
+function sleep(durationMs: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, durationMs);
+	});
+}
+
+function isServiceUnavailableError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	const errorWithCode = error as Error & { Code?: string; $metadata?: object };
+	return (
+		error.name === "ServiceUnavailable" ||
+		errorWithCode.Code === "ServiceUnavailable"
+	);
+}
+
+async function uploadWithRetry(
+	key: string,
+	body: Buffer,
+	contentType: string,
+	attempts = 3
+): Promise<void> {
+	let attempt = 0;
+	let delayMs = 250;
+
+	while (attempt < attempts) {
+		try {
+			await uploadToR2(key, body, contentType);
+			return;
+		} catch (error) {
+			attempt += 1;
+			if (!isServiceUnavailableError(error) || attempt >= attempts) {
+				throw error;
+			}
+
+			await sleep(delayMs);
+			delayMs *= 2;
+		}
+	}
+}
 
 /**
  * Creates a new processing job.
@@ -50,7 +97,7 @@ export async function createJob(
 	activeJobsCache.set(job.id, job);
 
 	// Persist to R2
-	await persistJob(job);
+	await persistJob(job, { force: true });
 
 	return job;
 }
@@ -110,7 +157,12 @@ export async function updateJobStatus(
 	}
 
 	activeJobsCache.set(jobId, job);
-	await persistJob(job);
+	await persistJob(job, { force: true });
+
+	if (status === "completed" || status === "failed") {
+		jobPersistQueue.delete(jobId);
+		jobPersistLast.delete(jobId);
+	}
 }
 
 /**
@@ -144,7 +196,7 @@ export async function updateJobProgress(
 	}
 
 	activeJobsCache.set(jobId, job);
-	await persistJob(job);
+	await persistJob(job, { bestEffort: true });
 }
 
 /**
@@ -176,7 +228,7 @@ export async function addJobResult(
 	}
 
 	activeJobsCache.set(jobId, job);
-	await persistJob(job);
+	await persistJob(job, { bestEffort: true });
 }
 
 /**
@@ -204,7 +256,7 @@ export async function addJobError(
 	job.updatedAt = new Date().toISOString();
 
 	activeJobsCache.set(jobId, job);
-	await persistJob(job);
+	await persistJob(job, { bestEffort: true });
 }
 
 /**
@@ -280,11 +332,47 @@ export function listActiveJobs(): ProcessingJobSummary[] {
 /**
  * Persists a job to R2.
  */
-async function persistJob(job: ProcessingJob): Promise<void> {
+async function persistJob(
+	job: ProcessingJob,
+	options: { force?: boolean; bestEffort?: boolean } = {}
+): Promise<void> {
 	const key = generateProcessingResultKey(job.id, "job");
 	const data = JSON.stringify(job, null, 2);
+	const { force = false, bestEffort = false } = options;
 
-	await uploadToR2(key, Buffer.from(data), "application/json");
+	const previous = jobPersistQueue.get(job.id) ?? Promise.resolve();
+	const next = previous
+		.catch(() => undefined)
+		.then(async () => {
+			const now = Date.now();
+			const lastPersist = jobPersistLast.get(job.id) ?? 0;
+			const waitMs = Math.max(
+				0,
+				(force ? 0 : JOB_PERSIST_MIN_INTERVAL_MS) - (now - lastPersist)
+			);
+
+			if (bestEffort && waitMs > 0) {
+				return;
+			}
+
+			if (waitMs > 0) {
+				await sleep(waitMs);
+			}
+
+			try {
+				await uploadWithRetry(key, Buffer.from(data), "application/json");
+				jobPersistLast.set(job.id, Date.now());
+			} catch (error) {
+				if (bestEffort) {
+					console.warn(`[Jobs] Failed to persist job ${job.id}:`, error);
+					return;
+				}
+				throw error;
+			}
+		});
+
+	jobPersistQueue.set(job.id, next);
+	await next;
 }
 
 /**

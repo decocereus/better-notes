@@ -19,6 +19,27 @@ Document discoveries, gotchas, and solutions encountered during development.
 
 <!-- Add new learnings below this line -->
 
+### 2026-01-26 - JSON + Markdown Hybrid for Extraction UX
+
+**Context:** Pattern cards were unclear and model output drifted into metadata-only lines.
+**Problem:** Pure markdown is readable but hard to structure; pure JSON is structured but not UX-friendly.
+**Solution:** Keep JSON as the source of truth, and add per-type markdown summaries (`sections[]`) for UI highlights.
+**Lesson:** Use structured JSON for grouping and filtering, and render a concise markdown “Highlights” list for humans.
+
+### 2026-01-26 - ai-elements Streamdown for Markdown Rendering
+
+**Context:** Needed a consistent markdown renderer across the app.
+**Problem:** Ad-hoc markdown renderers risk styling and accessibility drift.
+**Solution:** Use ai-elements `MessageResponse` (Streamdown) to render markdown highlights.
+**Lesson:** Centralize markdown rendering in ai-elements to keep typography and formatting consistent.
+
+### 2026-01-26 - Re-extract Without Re-OCR
+
+**Context:** Prompt/schema improvements should not require re-running OCR on large PDFs.
+**Problem:** Re-running OCR is slow and expensive; extraction tweaks are frequent.
+**Solution:** Add a re-extract flow that starts extraction from existing OCR results.
+**Lesson:** Separate OCR and extraction to allow fast iteration on downstream parsing and UX.
+
 ### 2026-01-25 - Self-Hosted PDF Converter with Poppler
 
 **Context:** Replacing CloudConvert with a self-hosted solution for PDF-to-image conversion

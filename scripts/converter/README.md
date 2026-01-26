@@ -27,14 +27,16 @@ Convert a PDF to images.
 }
 ```
 
-**Response:**
+**Response (immediate):**
 ```json
 {
-  "success": true,
-  "totalPages": 42,
-  "errors": []
+  "status": "started",
+  "message": "Conversion started"
 }
 ```
+
+Conversion runs asynchronously. Poll `/convert/:assetId/status` (or read
+`conversion-status.json` in R2) for progress and completion.
 
 ### GET /convert/:assetId/status
 

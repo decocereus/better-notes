@@ -7,7 +7,7 @@ import { mutation, query } from "./_generated/server";
 export const create = mutation({
 	args: {
 		assetId: v.id("assets"),
-		ocrJobId: v.string(),
+		ocrJobId: v.optional(v.string()),
 		extractionJobId: v.string(),
 		totalEssays: v.number(),
 		totalItems: v.number(),
@@ -29,15 +29,18 @@ export const create = mutation({
 
 		// If exists, update instead of creating duplicate
 		if (existing) {
-			await ctx.db.patch(existing._id, {
-				ocrJobId: args.ocrJobId,
+			const updates: Record<string, unknown> = {
 				extractionJobId: args.extractionJobId,
 				totalEssays: args.totalEssays,
 				totalItems: args.totalItems,
 				stats: args.stats,
 				resultsKey: args.resultsKey,
 				createdAt: new Date().toISOString(),
-			});
+			};
+			if (args.ocrJobId !== undefined) {
+				updates.ocrJobId = args.ocrJobId;
+			}
+			await ctx.db.patch(existing._id, updates);
 			return existing._id;
 		}
 

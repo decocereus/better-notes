@@ -66,7 +66,8 @@ export function AssetCard({
 		asset.sourceType === "pdf" &&
 		(asset.processingStatus === "pending" ||
 			asset.processingStatus === "ocr_failed" ||
-			asset.processingStatus === "extraction_failed");
+			asset.processingStatus === "extraction_failed" ||
+			(Boolean(asset.lastError) && isProcessing(asset.processingStatus)));
 
 	const processing = isProcessing(asset.processingStatus);
 

@@ -12,8 +12,12 @@ import {
 	Star,
 	User,
 } from "lucide-react";
+
+const FILENAME_PREFIX_REGEX = /^\d+-/;
+
 import { useMemo, useState } from "react";
 
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -160,6 +164,7 @@ const QUALITY_VARIANTS: Record<
 interface ExtractedContentBrowserProps {
 	items: ExtractedContent[];
 	onItemSelect?: (item: ExtractedContent) => void;
+	sectionsByType?: Partial<Record<ContentType, string[]>>;
 }
 
 /**
@@ -168,6 +173,7 @@ interface ExtractedContentBrowserProps {
 export function ExtractedContentBrowser({
 	items,
 	onItemSelect,
+	sectionsByType = {},
 }: ExtractedContentBrowserProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
@@ -359,6 +365,7 @@ export function ExtractedContentBrowser({
 							items={groupedItems[type] || []}
 							key={type}
 							onItemSelect={onItemSelect}
+							sectionMarkdown={sectionsByType[type]}
 							type={type}
 						/>
 					))}
@@ -394,14 +401,17 @@ interface ContentTypeGroupProps {
 	type: ContentType;
 	items: ExtractedContent[];
 	onItemSelect?: (item: ExtractedContent) => void;
+	sectionMarkdown?: string[];
 }
 
 function ContentTypeGroup({
 	type,
 	items,
 	onItemSelect,
+	sectionMarkdown,
 }: ContentTypeGroupProps) {
 	const [isOpen, setIsOpen] = useState(true);
+	const summaryMarkdown = sectionMarkdown?.filter(Boolean).join("\n\n");
 
 	return (
 		<Collapsible onOpenChange={setIsOpen} open={isOpen}>
@@ -423,6 +433,14 @@ function ContentTypeGroup({
 				</CollapsibleTrigger>
 				<CollapsibleContent>
 					<div className="space-y-2 border-t p-4">
+						{summaryMarkdown ? (
+							<div className="rounded-lg border bg-muted/30 p-3">
+								<p className="text-muted-foreground text-xs">Highlights</p>
+								<MessageResponse className="mt-2 text-pretty text-sm">
+									{summaryMarkdown}
+								</MessageResponse>
+							</div>
+						) : null}
 						{items.map((item) => (
 							<ContentItemCard
 								item={item}
@@ -443,6 +461,9 @@ interface ContentItemCardProps {
 }
 
 function ContentItemCard({ item, onClick }: ContentItemCardProps) {
+	const sourceLabel = getSourceLabel(item.sourceRef);
+	const essayLabel = getEssayLabel(item);
+
 	return (
 		<button
 			className="w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50"
@@ -450,7 +471,12 @@ function ContentItemCard({ item, onClick }: ContentItemCardProps) {
 			type="button"
 		>
 			<div className="flex items-start justify-between gap-2">
-				<p className="line-clamp-3 flex-1 text-sm">{item.content}</p>
+				<div className="flex-1">
+					<p className="text-muted-foreground text-xs">Snippet</p>
+					<p className="mt-1 line-clamp-3 text-pretty text-sm">
+						{item.content}
+					</p>
+				</div>
 				<div className="flex flex-col items-end gap-1">
 					<Badge variant={QUALITY_VARIANTS[item.quality]}>{item.quality}</Badge>
 					{item.isOverused && (
@@ -472,10 +498,21 @@ function ContentItemCard({ item, onClick }: ContentItemCardProps) {
 			</div>
 
 			{item.context && (
-				<p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
-					{item.context}
+				<p className="mt-2 line-clamp-2 text-pretty text-muted-foreground text-xs">
+					<span className="font-medium">Use:</span> {item.context}
 				</p>
 			)}
+
+			<div className="mt-2 flex flex-wrap gap-2">
+				<Badge className="max-w-full truncate" variant="outline">
+					Source: {sourceLabel}
+				</Badge>
+				{essayLabel ? (
+					<Badge className="tabular-nums" variant="outline">
+						Essay: {essayLabel}
+					</Badge>
+				) : null}
+			</div>
 
 			{item.exampleCategory && (
 				<Badge className="mt-2" variant="outline">
@@ -484,4 +521,26 @@ function ContentItemCard({ item, onClick }: ContentItemCardProps) {
 			)}
 		</button>
 	);
+}
+
+function getSourceLabel(sourceRef: string): string {
+	if (!sourceRef) {
+		return "Unknown";
+	}
+	const parts = sourceRef.split("/");
+	const filename = parts.at(-1) || sourceRef;
+	return filename.replace(FILENAME_PREFIX_REGEX, "");
+}
+
+function getEssayLabel(item: ExtractedContent): string | null {
+	if (item.essayTitle) {
+		return item.essayTitle;
+	}
+	if (item.essayStartPage && item.essayEndPage) {
+		return `Pages ${item.essayStartPage}-${item.essayEndPage}`;
+	}
+	if (item.essayIndex) {
+		return `#${item.essayIndex}`;
+	}
+	return null;
 }
