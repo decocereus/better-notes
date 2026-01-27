@@ -4,12 +4,57 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
+**Chunked Essay Processing** ✅ - Retry logic + gap detection for large PDFs
 **Extraction Quality & Parallelization** ✅ - Few-shot prompts + parallel batch processing
 **Extracted Content Browser UI Redesign** ✅ - Scholarly aesthetic with collapsible hierarchy
 **Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
 **Patterns Library UX + Re-extract** ✅ - Markdown highlights, clearer cards, re-extract from OCR
 **Build Status:** ✅ Passing (all issues resolved)
 **Tests:** ✅ 159 passing
+
+---
+
+## Chunked Essay Processing (2026-01-27) - Complete
+
+**Problem:** When processing large PDFs (1400+ pages), users experienced gaps in essay extraction - not all essays were being extracted. The existing parallel processing didn't have retry logic, so failed batches resulted in permanently lost essays.
+
+**Solution:** New chunked processor with robust error handling, retry logic, and comprehensive gap detection.
+
+### Key Features
+
+1. **Chunked Processing**: Groups essays into chunks (15 essays/chunk) for better error isolation
+2. **Retry Logic**: Each chunk retried up to 2 times with exponential backoff
+3. **Gap Detection**: Identifies pages not covered by any detected essay
+4. **Comprehensive Logging**: Detailed stats on success/failure rates, retries, and coverage
+5. **Large PDF Validation**: Warnings when essay count seems suspiciously low
+
+### Architecture
+
+- PDFs ≤ 500 pages: Standard parallel processing
+- PDFs > 500 pages: Chunked processing with retry logic
+- Boundary detection: Retry failed 50-page batches
+- Extraction: Process 15-essay chunks with per-chunk retry
+
+### Files Added/Modified
+
+- `lib/extraction/chunked-processor.ts` - New chunked processor (NEW)
+- `lib/extraction/essay-detector.ts` - Added batch retry logic
+- `lib/extraction/index.ts` - Export new functions
+- `app/api/extract/route.ts` - Use chunked processor for large PDFs
+
+### Usage
+
+For PDFs > 500 pages, chunked processing is automatic via `/api/extract`:
+
+```typescript
+const { results, stats } = await processEssaysInChunks(
+  ocrResults,
+  parameters,
+  sourceRef,
+  { essaysPerChunk: 15, maxRetries: 2 }
+);
+// stats includes: successful, failed, retried, gaps, errors
+```
 
 ---
 

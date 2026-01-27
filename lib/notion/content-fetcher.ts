@@ -4,7 +4,7 @@
  * Converts Notion content into ExtractedContent format.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	assessMultiUse,
@@ -121,39 +121,43 @@ export async function extractUserContentFromPage(
 		userContent.title
 	);
 
-	const result = await generateObject({
+	const { output } = await generateText({
 		model,
-		schema: ExtractionResultSchema,
+		output: Output.object({
+			schema: ExtractionResultSchema,
+		}),
 		system: EXTRACTION_SYSTEM_PROMPT,
 		prompt,
 	});
 
-	// Convert to ExtractedContent format with user source type
-	const extractedContent: ExtractedContent[] = result.object.items.map(
-		(item) => {
-			const qualityResult = calculateQuality(item.content, item.contentType);
-			const overused = isOverusedExample(
-				item.content,
-				parameters.overusedExamples
-			);
-			const multiUse = assessMultiUse(item.content, item.contentType);
+	if (!output) {
+		return [];
+	}
 
-			return {
-				id: crypto.randomUUID(),
-				sourceType: "user" as const,
-				sourceRef: userContent.pageId,
-				contentType: item.contentType,
-				exampleCategory: item.exampleCategory,
-				content: item.content,
-				context: item.context,
-				quality: qualityResult.quality,
-				isOverused: overused || item.isOverused,
-				multiUse: multiUse || item.multiUse,
-				themes: [], // Will be classified in a separate step
-				createdAt: new Date().toISOString(),
-			};
-		}
-	);
+	// Convert to ExtractedContent format with user source type
+	const extractedContent: ExtractedContent[] = output.items.map((item) => {
+		const qualityResult = calculateQuality(item.content, item.contentType);
+		const overused = isOverusedExample(
+			item.content,
+			parameters.overusedExamples
+		);
+		const multiUse = assessMultiUse(item.content, item.contentType);
+
+		return {
+			id: crypto.randomUUID(),
+			sourceType: "user" as const,
+			sourceRef: userContent.pageId,
+			contentType: item.contentType,
+			exampleCategory: item.exampleCategory,
+			content: item.content,
+			context: item.context,
+			quality: qualityResult.quality,
+			isOverused: overused || item.isOverused,
+			multiUse: multiUse || item.multiUse,
+			themes: [], // Will be classified in a separate step
+			createdAt: new Date().toISOString(),
+		};
+	});
 
 	return extractedContent;
 }

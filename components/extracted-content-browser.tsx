@@ -12,7 +12,7 @@ import {
 	Sparkles,
 	User,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,14 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import {
+	Pagination,
+	PaginationContent,
+	PaginationItem,
+	PaginationLink,
+	PaginationNext,
+	PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
 	Select,
 	SelectContent,
@@ -171,11 +179,16 @@ function matchesFilters(
 interface ExtractedContentBrowserProps {
 	items: ExtractedContent[];
 	onItemSelect?: (item: ExtractedContent) => void;
+	/** Number of essays to show per page (default: 5) */
+	essaysPerPage?: number;
 }
+
+const DEFAULT_ESSAYS_PER_PAGE = 5;
 
 export function ExtractedContentBrowser({
 	items,
 	onItemSelect,
+	essaysPerPage = DEFAULT_ESSAYS_PER_PAGE,
 }: ExtractedContentBrowserProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
@@ -187,6 +200,7 @@ export function ExtractedContentBrowser({
 	);
 	const [showOverused, setShowOverused] = useState(true);
 	const [showMultiUseOnly, setShowMultiUseOnly] = useState(false);
+	const [currentPage, setCurrentPage] = useState(1);
 
 	const stats = useMemo(() => {
 		let high = 0;
@@ -237,6 +251,33 @@ export function ExtractedContentBrowser({
 		}
 		return groups;
 	}, [filteredItems]);
+
+	// Pagination logic
+	const essayEntries = useMemo(
+		() => Array.from(groupedByEssay.entries()),
+		[groupedByEssay]
+	);
+	const totalEssays = essayEntries.length;
+	const totalPages = Math.max(1, Math.ceil(totalEssays / essaysPerPage));
+
+	// Reset to page 1 when filters change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Intentionally reset page when filter dependencies change
+	useEffect(() => {
+		setCurrentPage(1);
+	}, [
+		searchQuery,
+		typeFilter,
+		qualityFilter,
+		categoryFilter,
+		showOverused,
+		showMultiUseOnly,
+	]);
+
+	// Get current page essays
+	const paginatedEssays = useMemo(() => {
+		const startIndex = (currentPage - 1) * essaysPerPage;
+		return essayEntries.slice(startIndex, startIndex + essaysPerPage);
+	}, [essayEntries, currentPage, essaysPerPage]);
 
 	return (
 		<div className="space-y-6">
@@ -344,16 +385,75 @@ export function ExtractedContentBrowser({
 				</div>
 			) : (
 				<div className="space-y-6">
-					{Array.from(groupedByEssay.entries()).map(
-						([essayTitle, essayItems]) => (
-							<EssayGroup
-								items={essayItems}
-								key={essayTitle}
-								onItemSelect={onItemSelect}
-								title={essayTitle}
-							/>
-						)
-					)}
+					{paginatedEssays.map(([essayTitle, essayItems]) => (
+						<EssayGroup
+							items={essayItems}
+							key={essayTitle}
+							onItemSelect={onItemSelect}
+							title={essayTitle}
+						/>
+					))}
+				</div>
+			)}
+
+			{/* Pagination */}
+			{totalEssays > essaysPerPage && (
+				<div className="pt-4">
+					<Pagination>
+						<PaginationContent>
+							<PaginationItem>
+								<PaginationPrevious
+									aria-disabled={currentPage === 1}
+									className={
+										currentPage === 1 ? "pointer-events-none opacity-50" : ""
+									}
+									href="#"
+									onClick={(e) => {
+										e.preventDefault();
+										setCurrentPage((p) => Math.max(1, p - 1));
+									}}
+								/>
+							</PaginationItem>
+
+							{Array.from({ length: totalPages }, (_, i) => i + 1).map(
+								(page) => (
+									<PaginationItem key={page}>
+										<PaginationLink
+											href="#"
+											isActive={page === currentPage}
+											onClick={(e) => {
+												e.preventDefault();
+												setCurrentPage(page);
+											}}
+										>
+											{page}
+										</PaginationLink>
+									</PaginationItem>
+								)
+							)}
+
+							<PaginationItem>
+								<PaginationNext
+									aria-disabled={currentPage === totalPages}
+									className={
+										currentPage === totalPages
+											? "pointer-events-none opacity-50"
+											: ""
+									}
+									href="#"
+									onClick={(e) => {
+										e.preventDefault();
+										setCurrentPage((p) => Math.min(totalPages, p + 1));
+									}}
+								/>
+							</PaginationItem>
+						</PaginationContent>
+					</Pagination>
+					<p className="text-center text-muted-foreground text-xs">
+						Showing {(currentPage - 1) * essaysPerPage + 1}–
+						{Math.min(currentPage * essaysPerPage, totalEssays)} of{" "}
+						{totalEssays} total essays
+					</p>
 				</div>
 			)}
 		</div>

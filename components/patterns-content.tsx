@@ -34,39 +34,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useExtractionSse } from "@/lib/hooks/use-extraction-sse";
 import { useSettings } from "@/lib/hooks/use-settings";
 import type { ContentType, ExtractedContent } from "@/types/extraction";
-
-/**
- * Response type for extraction job status.
- */
-interface ExtractionJobResponse {
-	job: {
-		id: string;
-		status: "pending" | "processing" | "completed" | "failed";
-		progress: number;
-		totalItems: number;
-		processedItems: number;
-		errors: string[];
-		createdAt: string;
-		completedAt?: string;
-	};
-	results?: {
-		jobId: string;
-		ocrJobId: string;
-		sourceKey: string;
-		totalEssays: number;
-		allItems: ExtractedContent[];
-		stats: {
-			totalEssays: number;
-			totalItems: number;
-			byType: Record<string, number>;
-			byQuality: Record<string, number>;
-			overusedCount: number;
-			multiUseCount: number;
-		};
-	};
-}
 
 interface PatternsResponse {
 	items: ExtractedContent[];
@@ -145,7 +115,6 @@ export function PatternsContent() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [activeJobId, setActiveJobId] = useState<string | null>(null);
-	const [jobProgress, setJobProgress] = useState<number>(0);
 	const [reextractOpen, setReextractOpen] = useState(false);
 	const [assets, setAssets] = useState<ReextractAsset[]>([]);
 	const [assetsError, setAssetsError] = useState<string | null>(null);
@@ -179,47 +148,27 @@ export function PatternsContent() {
 		}
 	}, []);
 
-	// Poll for extraction job status
-	const pollJobStatus = useCallback(
-		async (jobId: string) => {
-			try {
-				const response = await fetch(`/api/extract?jobId=${jobId}`);
-				const data = (await response.json()) as ExtractionJobResponse;
-
-				if (data.job.status === "completed") {
-					await loadExtractedItems();
-					setActiveJobId(null);
-					setJobProgress(100);
-				} else if (data.job.status === "failed") {
-					setError(
-						data.job.errors?.[0] || "Extraction failed. Please try again."
-					);
-					setActiveJobId(null);
-				} else {
-					setJobProgress(data.job.progress);
-					setTimeout(() => pollJobStatus(jobId), 2000);
-				}
-			} catch {
-				setError("Failed to check extraction status");
+	// Use SSE for real-time progress tracking
+	const { progress: jobProgress, isConnected: sseConnected } = useExtractionSse(
+		{
+			jobId: activeJobId,
+			onCompleted: () => {
+				loadExtractedItems().catch(() => {});
 				setActiveJobId(null);
-			}
-		},
-		[loadExtractedItems]
+			},
+			onError: (message) => {
+				setError(message);
+				setActiveJobId(null);
+			},
+		}
 	);
 
 	// Initial load
 	useEffect(() => {
 		if (isHydrated) {
-			loadExtractedItems();
+			loadExtractedItems().catch(() => {});
 		}
 	}, [isHydrated, loadExtractedItems]);
-
-	// Start polling if there's an active job
-	useEffect(() => {
-		if (activeJobId) {
-			pollJobStatus(activeJobId);
-		}
-	}, [activeJobId, pollJobStatus]);
 
 	useEffect(() => {
 		if (!reextractOpen) {
@@ -278,9 +227,12 @@ export function PatternsContent() {
 	const eligibleAssets = assets.filter(
 		(asset) =>
 			asset.sourceType === "pdf" &&
-			["ocr_completed", "extraction_failed", "extraction_completed"].includes(
-				asset.processingStatus
-			)
+			[
+				"ocr_completed",
+				"extraction_failed",
+				"extraction_completed",
+				"extraction_processing",
+			].includes(asset.processingStatus)
 	);
 
 	const handleReextract = async () => {
@@ -441,7 +393,12 @@ export function PatternsContent() {
 					<div className="flex items-center gap-3">
 						<Loader2 className="size-5 animate-spin text-primary" />
 						<div className="flex-1">
-							<p className="font-medium">Extracting content...</p>
+							<div className="flex items-center justify-between">
+								<p className="font-medium">Extracting content...</p>
+								{sseConnected && (
+									<span className="text-muted-foreground text-xs">● Live</span>
+								)}
+							</div>
 							<div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
 								<div
 									className="h-full bg-primary transition-all"

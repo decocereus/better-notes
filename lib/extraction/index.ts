@@ -4,6 +4,15 @@
  * @module lib/extraction
  */
 
+export type {
+	ChunkedProcessingConfig,
+	ProcessingStats,
+} from "./chunked-processor";
+export {
+	DEFAULT_CONFIG as CHUNKED_PROCESSOR_DEFAULTS,
+	processEssaysInChunks,
+	validateLargePdfBoundaries,
+} from "./chunked-processor";
 export {
 	extractContentBatch,
 	extractContentFromEssay,
@@ -17,7 +26,6 @@ export {
 	getEssayText,
 	validateBoundaries,
 } from "./essay-detector";
-
 export {
 	assessMultiUse,
 	calculateQuality,

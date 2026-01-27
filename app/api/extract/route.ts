@@ -15,7 +15,9 @@ import {
 	extractContentBatch,
 	getEssayText,
 	getExtractionStats,
+	processEssaysInChunks,
 	validateBoundaries,
+	validateLargePdfBoundaries,
 } from "@/lib/extraction";
 import {
 	addJobError,
@@ -478,7 +480,14 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * Threshold for using chunked processing (pages).
+ * PDFs larger than this use chunked processor with enhanced error handling.
+ */
+const CHUNKED_PROCESSING_THRESHOLD = 500;
+
+/**
  * Background function to process extraction job.
+ * Uses chunked processing for large PDFs to ensure no essays are missed.
  */
 async function processExtractionJob(
 	jobId: string,
@@ -487,37 +496,135 @@ async function processExtractionJob(
 	parameters: ExtractionParameters,
 	assetId?: string
 ) {
-	// Step 1: Detect essay boundaries
-	const boundaries = await detectEssayBoundaries(ocrResults.pages);
+	let extractionResults: EssayExtractionResult[];
+	let processingStats: {
+		totalEssays: number;
+		successful: number;
+		failed: number;
+		retried: number;
+		chunksProcessed: number;
+		chunksFailed: number;
+		totalPages: number;
+		pagesCovered: number;
+		gaps: Array<{ start: number; end: number }>;
+		errors: Array<{
+			chunkIndex: number;
+			essayIndices: number[];
+			error: string;
+		}>;
+	} | null = null;
 
-	// Validate boundaries
-	const validation = validateBoundaries(boundaries, ocrResults.totalPages);
-	if (!validation.valid) {
-		for (const issue of validation.issues) {
-			await addJobError(jobId, issue);
+	// Determine processing strategy based on PDF size
+	const isLargePdf = ocrResults.totalPages > CHUNKED_PROCESSING_THRESHOLD;
+
+	if (isLargePdf) {
+		console.log(
+			`[ExtractionJob ${jobId}] Large PDF detected (${ocrResults.totalPages} pages), using chunked processing`
+		);
+
+		// Use chunked processor for large PDFs
+		const { results, stats } = await processEssaysInChunks(
+			ocrResults.pages,
+			parameters,
+			ocrResults.sourceKey,
+			{
+				essaysPerChunk: 15,
+				maxRetries: 2,
+				continueOnFailure: true,
+				enableLogging: true,
+			},
+			async (_processedChunks, _totalChunks, currentEssay, totalEssays) => {
+				await updateJobProgress(jobId, currentEssay, totalEssays);
+			}
+		);
+
+		extractionResults = results;
+		processingStats = stats;
+
+		// Log any issues found
+		if (stats.errors.length > 0) {
+			for (const error of stats.errors) {
+				await addJobError(
+					jobId,
+					`Chunk ${error.chunkIndex + 1} failed: ${error.error}`,
+					error.essayIndices[0],
+					"CHUNK_FAILED"
+				);
+			}
 		}
+
+		if (stats.gaps.length > 0) {
+			for (const gap of stats.gaps) {
+				await addJobError(
+					jobId,
+					`Page gap detected: pages ${gap.start}-${gap.end} not covered by any essay`,
+					undefined,
+					"PAGE_GAP"
+				);
+			}
+		}
+
+		console.log(`[ExtractionJob ${jobId}] Chunked processing complete:`, {
+			totalEssays: stats.totalEssays,
+			successful: stats.successful,
+			failed: stats.failed,
+			gaps: stats.gaps.length,
+		});
+	} else {
+		console.log(
+			`[ExtractionJob ${jobId}] Standard processing for ${ocrResults.totalPages} pages`
+		);
+
+		// Step 1: Detect essay boundaries
+		const boundaries = await detectEssayBoundaries(ocrResults.pages);
+
+		// Validate boundaries
+		const validation = validateBoundaries(boundaries, ocrResults.totalPages);
+		if (!validation.valid) {
+			for (const issue of validation.issues) {
+				await addJobError(jobId, issue);
+			}
+		}
+
+		// For larger PDFs (100-500 pages), also run large PDF validation
+		if (ocrResults.totalPages > 100) {
+			const largePdfValidation = validateLargePdfBoundaries(
+				boundaries,
+				ocrResults.totalPages
+			);
+			if (!largePdfValidation.valid) {
+				for (const warning of largePdfValidation.warnings) {
+					await addJobError(
+						jobId,
+						`Validation warning: ${warning}`,
+						undefined,
+						"VALIDATION_WARNING"
+					);
+				}
+			}
+		}
+
+		// Update total items to essay count
+		await updateJobProgress(jobId, 0, boundaries.length);
+
+		// Step 2: Prepare essays for extraction
+		const essays = boundaries.map((boundary) => ({
+			text: getEssayText(ocrResults.pages, boundary),
+			startPage: boundary.startPage,
+			endPage: boundary.endPage,
+			title: boundary.title,
+		}));
+
+		// Step 3: Extract content from each essay
+		extractionResults = await extractContentBatch(
+			essays,
+			parameters,
+			ocrResults.sourceKey,
+			async (processed, total) => {
+				await updateJobProgress(jobId, processed, total);
+			}
+		);
 	}
-
-	// Update total items to essay count
-	await updateJobProgress(jobId, 0, boundaries.length);
-
-	// Step 2: Prepare essays for extraction
-	const essays = boundaries.map((boundary) => ({
-		text: getEssayText(ocrResults.pages, boundary),
-		startPage: boundary.startPage,
-		endPage: boundary.endPage,
-		title: boundary.title,
-	}));
-
-	// Step 3: Extract content from each essay
-	const extractionResults = await extractContentBatch(
-		essays,
-		parameters,
-		ocrResults.sourceKey,
-		async (processed, total) => {
-			await updateJobProgress(jobId, processed, total);
-		}
-	);
 
 	// Collect all items
 	const allItems = extractionResults.flatMap((r) => r.items);
@@ -531,7 +638,10 @@ async function processExtractionJob(
 	}
 
 	// Save complete results to R2
-	const fullResults: ExtractionJobResults = {
+	const fullResults: ExtractionJobResults & {
+		processingStats?: typeof processingStats;
+		isLargePdf?: boolean;
+	} = {
 		jobId,
 		ocrJobId,
 		sourceKey: ocrResults.sourceKey,
@@ -541,6 +651,8 @@ async function processExtractionJob(
 		stats,
 		parameters,
 		processedAt: new Date().toISOString(),
+		isLargePdf,
+		processingStats,
 	};
 
 	const resultsKey = `processing/${jobId}/extraction-results.json`;

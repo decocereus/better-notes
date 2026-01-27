@@ -209,6 +209,67 @@ async function loadThemesFromConvex(
 }
 
 /**
+ * Asset info returned from Convex.
+ */
+interface AssetInfo {
+	id: string;
+	key: string;
+	projectId?: string;
+	processingStatus: string;
+	extractionJobId?: string;
+}
+
+/**
+ * Gets extraction status by checking both the job and the asset record.
+ * Returns true if extraction is complete based on either source.
+ * Also returns asset info needed for creating the classification job.
+ */
+async function isExtractionComplete(extractionJobId: string): Promise<{
+	complete: boolean;
+	job: Awaited<ReturnType<typeof getJob>>;
+	asset?: AssetInfo;
+}> {
+	const job = await getJob(extractionJobId);
+
+	// If job exists and is completed, we're done
+	if (job?.status === "completed") {
+		return { complete: true, job };
+	}
+
+	// Otherwise, check if any asset has this extraction job ID and is completed
+	// This handles cases where the job status may have been lost from cache
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (convexUrl) {
+		try {
+			const convex = getConvexClient();
+			const assets = await convex.query(api.assets.list, {});
+
+			for (const asset of assets) {
+				if (asset.extractionJobId === extractionJobId) {
+					const isAssetCompleted =
+						asset.processingStatus === "extraction_completed";
+					return {
+						complete: isAssetCompleted,
+						job,
+						asset: {
+							id: asset.id,
+							key: asset.key,
+							projectId: asset.projectId,
+							processingStatus: asset.processingStatus,
+							extractionJobId: asset.extractionJobId,
+						},
+					};
+				}
+			}
+		} catch {
+			// Fall through to job-only check
+		}
+	}
+
+	return { complete: false, job };
+}
+
+/**
  * POST /api/classify
  * Starts a new classification job.
  */
@@ -229,21 +290,25 @@ export async function POST(request: NextRequest) {
 
 		const { extractionJobId, themePageId } = validation;
 
-		// Verify extraction job is completed
-		const extractionJob = await getJob(extractionJobId);
-		if (!extractionJob) {
-			return NextResponse.json(
-				{ error: "Extraction job not found" },
-				{ status: 404 }
-			);
-		}
+		// Verify extraction is completed (check both job and asset status)
+		const extractionCheck = await isExtractionComplete(extractionJobId);
 
-		if (extractionJob.status !== "completed") {
+		if (!extractionCheck.complete) {
+			// Not complete - return appropriate error
+			if (!extractionCheck.job) {
+				return NextResponse.json(
+					{ error: "Extraction job not found" },
+					{ status: 404 }
+				);
+			}
+
 			return NextResponse.json(
 				{
 					error: "Extraction job not completed",
-					status: extractionJob.status,
-					progress: extractionJob.progress,
+					status:
+						extractionCheck.asset?.processingStatus ||
+						extractionCheck.job.status,
+					progress: extractionCheck.job.progress,
 				},
 				{ status: 400 }
 			);
@@ -272,11 +337,24 @@ export async function POST(request: NextRequest) {
 		}
 		const themes = themesResult.themes;
 
+		// Get source key and project ID from job or asset
+		const sourceKey =
+			extractionCheck.job?.sourceKey ?? extractionCheck.asset?.key;
+		const projectId =
+			extractionCheck.job?.projectId ?? extractionCheck.asset?.projectId;
+
+		if (!sourceKey) {
+			return NextResponse.json(
+				{ error: "Cannot determine source key for classification" },
+				{ status: 500 }
+			);
+		}
+
 		// Create the classification job
 		const job = await createJob(
 			"classification",
-			extractionJob.sourceKey,
-			extractionJob.projectId,
+			sourceKey,
+			projectId,
 			extractedContent.length
 		);
 

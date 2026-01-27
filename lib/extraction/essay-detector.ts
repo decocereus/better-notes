@@ -9,7 +9,7 @@
  * - Merges results, handling essays that span batch boundaries
  */
 
-import { generateObject, generateText } from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getModel } from "@/lib/ai/client";
 import type { EssayBoundary } from "@/types/extraction";
@@ -23,8 +23,8 @@ const WORD_SPLIT_REGEX = /\s+/;
 /** Pages per batch for boundary detection (keep small for LLM context) */
 const PAGES_PER_BATCH = 50;
 
-/** Maximum concurrent batch processing */
-const MAX_BOUNDARY_CONCURRENCY = 3;
+/** Maximum concurrent batch processing (reserved for future parallel processing) */
+const _MAX_BOUNDARY_CONCURRENCY = 3;
 
 /** Overlap pages between batches to detect cross-boundary essays */
 const BATCH_OVERLAP_PAGES = 5;
@@ -271,14 +271,20 @@ async function detectBoundariesInBatch(
 	const prompt = createBoundaryDetectionPrompt(ocrResults);
 
 	try {
-		const result = await generateObject({
+		const { output: result } = await generateText({
 			model,
-			schema: EssayBoundarySchema,
+			output: Output.object({
+				schema: EssayBoundarySchema,
+			}),
 			system: ESSAY_BOUNDARY_SYSTEM_PROMPT,
 			prompt,
 		});
 
-		return convertToBoundaries(result.object, ocrResults);
+		if (!result) {
+			throw new Error("Structured output returned null");
+		}
+
+		return convertToBoundaries(result, ocrResults);
 	} catch (error) {
 		console.warn(
 			"[EssayDetector] Structured output failed, attempting JSON fallback",
@@ -316,8 +322,12 @@ async function detectBoundariesInBatch(
 	}
 }
 
+/** Maximum retries for failed boundary detection batches */
+const MAX_BATCH_RETRIES = 2;
+
 /**
  * Processes large PDFs by splitting into batches and processing in parallel.
+ * Includes retry logic for failed batches to ensure no pages are missed.
  */
 async function detectBoundariesChunked(
 	ocrResults: OcrPageResult[],
@@ -335,43 +345,72 @@ async function detectBoundariesChunked(
 		`[EssayDetector] Split into ${totalBatches} batches of ~${PAGES_PER_BATCH} pages each`
 	);
 
-	// Process batches with controlled concurrency
+	// Process batches with controlled concurrency and retry logic
 	const allBoundaries: EssayBoundary[][] = new Array(totalBatches);
 	let processedBatches = 0;
+	let failedBatches = 0;
 
-	// Process in waves of MAX_BOUNDARY_CONCURRENCY
-	for (let i = 0; i < totalBatches; i += MAX_BOUNDARY_CONCURRENCY) {
-		const waveBatches = batches.slice(i, i + MAX_BOUNDARY_CONCURRENCY);
-		const wavePromises = waveBatches.map(async (batch, waveIndex) => {
-			const batchIndex = i + waveIndex;
+	for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+		const batch = batches[batchIndex];
+		let retryCount = 0;
+		let success = false;
+
+		while (!success && retryCount <= MAX_BATCH_RETRIES) {
+			if (retryCount > 0) {
+				console.log(
+					`[EssayDetector] Retrying batch ${batchIndex + 1}/${totalBatches}, attempt ${retryCount + 1}/${MAX_BATCH_RETRIES + 1}`
+				);
+				// Add exponential backoff between retries
+				await new Promise((resolve) =>
+					setTimeout(resolve, 1000 * 2 ** (retryCount - 1))
+				);
+			}
+
 			try {
 				const boundaries = await detectBoundariesInBatch(batch.pages);
-				return { batchIndex, boundaries, success: true as const };
-			} catch (error) {
-				console.error(
-					`[EssayDetector] Batch ${batchIndex} failed:`,
-					error instanceof Error ? error.message : error
-				);
-				return { batchIndex, boundaries: [], success: false as const };
-			}
-		});
-
-		const waveResults = await Promise.allSettled(wavePromises);
-
-		for (const result of waveResults) {
-			if (result.status === "fulfilled") {
-				allBoundaries[result.value.batchIndex] = result.value.boundaries;
+				allBoundaries[batchIndex] = boundaries;
+				success = true;
 				processedBatches++;
-				onProgress?.(processedBatches, totalBatches);
+			} catch (error) {
+				retryCount++;
+				const errorMessage =
+					error instanceof Error ? error.message : String(error);
+				console.error(
+					`[EssayDetector] Batch ${batchIndex + 1} failed (attempt ${retryCount}/${MAX_BATCH_RETRIES + 1}):`,
+					errorMessage
+				);
+
+				if (retryCount > MAX_BATCH_RETRIES) {
+					// All retries exhausted
+					console.error(
+						`[EssayDetector] Batch ${batchIndex + 1} failed permanently after ${MAX_BATCH_RETRIES + 1} attempts. Pages ${batch.startIndex + 1}-${batch.endIndex + 1} may have undetected essays.`
+					);
+					allBoundaries[batchIndex] = [];
+					failedBatches++;
+				}
 			}
 		}
+
+		onProgress?.(processedBatches, totalBatches);
+
+		// Add small delay between batches to avoid rate limits
+		if (batchIndex < totalBatches - 1) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+	}
+
+	// Log summary
+	if (failedBatches > 0) {
+		console.warn(
+			`[EssayDetector] WARNING: ${failedBatches}/${totalBatches} batches failed permanently. Some essays may have been missed.`
+		);
 	}
 
 	// Merge boundaries from all batches
 	const merged = mergeBatchBoundaries(allBoundaries, ocrResults);
 
 	console.log(
-		`[EssayDetector] Detected ${merged.length} essays across ${totalBatches} batches`
+		`[EssayDetector] Detected ${merged.length} essays across ${totalBatches} batches (${failedBatches} failed)`
 	);
 
 	return merged;

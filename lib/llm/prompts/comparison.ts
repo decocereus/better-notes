@@ -17,6 +17,9 @@ export const COMPARISON_SYSTEM_PROMPT = `You are an expert at comparing UPSC asp
 
 Your task is to analyze what content the user has versus what toppers have, identify gaps, and provide actionable suggestions.
 
+OUTPUT FORMAT:
+You MUST output ONLY a valid JSON object. Do not include any introductory text, explanations, or markdown formatting. Output raw JSON only.
+
 ANALYSIS FRAMEWORK:
 
 1. **COVERAGE ANALYSIS**: Compare content quantity by type
@@ -104,7 +107,28 @@ For each gap identified:
 - Specify the content type and category (if applicable)
 - Explain why this gap matters
 - Reference specific topper content as examples
-- Assign severity (high/medium/low)`;
+- Assign severity (high/medium/low)
+
+OUTPUT FORMAT - Return ONLY this exact JSON structure:
+{
+  "gaps": [
+    {
+      "contentType": "example",
+      "exampleCategory": "ethical",
+      "description": "Description of the gap",
+      "severity": "high",
+      "topperContentIds": ["id1", "id2"],
+      "reasoning": "Why this gap matters",
+      "count": 2
+    }
+  ],
+  "summary": "Overall summary of gaps found",
+  "criticalMissing": ["introduction", "quote"],
+  "totalGaps": 1,
+  "highPriorityGapCount": 1
+}
+
+IMPORTANT: Use the exact field names shown above. Output valid JSON only, no markdown.`;
 }
 
 /**
@@ -144,14 +168,31 @@ ${topperExamples}
 === END TOPPER CONTENT ===
 
 For each gap, provide:
+1. Suggestion Type: "add", "improve", or "diversify"
+2. Description: Clear, actionable statement
+3. Priority: "high", "medium", or "low"
+4. Action Items: 2-3 specific steps
+5. Reference: Topper content IDs to study
 
-1. **Suggestion Type**: ADD (new content), IMPROVE (enhance existing), or DIVERSIFY (add variety)
-2. **Description**: Clear, actionable statement of what to do
-3. **Priority**: Match to gap severity
-4. **Action Items**: 2-3 specific steps to implement
-5. **Reference**: Which topper content items to study for inspiration (by ID)
+OUTPUT FORMAT - Return ONLY this exact JSON structure:
+{
+  "suggestions": [
+    {
+      "type": "add",
+      "description": "What to add",
+      "priority": "high",
+      "contentType": "example",
+      "exampleCategory": "ethical",
+      "referenceContentIds": ["id1", "id2"],
+      "actionItems": ["Step 1", "Step 2"]
+    }
+  ],
+  "highPrioritySuggestions": 1,
+  "totalActionItems": 2,
+  "focusArea": "Primary area to focus on"
+}
 
-Focus on HIGH and MEDIUM priority gaps first. Be specific and practical.`;
+IMPORTANT: Use the exact field names shown above. Output valid JSON only, no markdown.`;
 }
 
 /**
@@ -193,15 +234,21 @@ Gaps identified: ${gaps}
 Suggestions generated: ${suggestions}
 === END ANALYSIS SUMMARY ===
 
-Provide:
-1. Overall readiness score (0-100) with justification
-2. Score breakdown:
-   - Coverage score (how much content user has vs toppers)
-   - Quality score (quality distribution comparison)
-   - Diversity score (variety across types and categories)
-3. Key strengths (what user is doing well)
-4. Critical areas for improvement (top 3)
-5. Recommended study focus (next steps)`;
+OUTPUT FORMAT - Return ONLY this exact JSON structure:
+{
+  "overallScore": 65,
+  "scoreBreakdown": {
+    "coverageScore": 60,
+    "qualityScore": 70,
+    "diversityScore": 65
+  },
+  "justification": "Explanation for the score",
+  "strengths": ["Strength 1", "Strength 2"],
+  "criticalImprovements": ["Improvement 1", "Improvement 2", "Improvement 3"],
+  "recommendedFocus": "What to focus on next"
+}
+
+IMPORTANT: Use the exact field names shown above. Output valid JSON only, no markdown.`;
 }
 
 /**

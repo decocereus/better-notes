@@ -4,7 +4,7 @@
  * Uses LLM with structured output for accurate classification.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	CLASSIFICATION_SYSTEM_PROMPT,
@@ -52,35 +52,51 @@ export async function classifyContent(
 	const model = getModel("CLASSIFICATION");
 	const prompt = createClassificationPrompt(content, themes);
 
-	const result = await generateObject({
-		model,
-		schema: SingleClassificationResultSchema,
-		system: CLASSIFICATION_SYSTEM_PROMPT,
-		prompt,
-	});
+	try {
+		const { output: classification } = await generateText({
+			model,
+			output: Output.object({
+				schema: SingleClassificationResultSchema,
+			}),
+			system: CLASSIFICATION_SYSTEM_PROMPT,
+			prompt,
+		});
 
-	const classification = result.object;
+		if (!classification) {
+			console.warn(
+				`Classification returned null for content ${content.id}, returning unclassified`
+			);
+			return content;
+		}
 
-	// Filter mappings by relevance threshold
-	const validMappings = filterByRelevance(
-		classification.mappings,
-		MIN_RELEVANCE_THRESHOLD
-	);
+		// Filter mappings by relevance threshold
+		const validMappings = filterByRelevance(
+			classification.mappings,
+			MIN_RELEVANCE_THRESHOLD
+		);
 
-	// Convert to the format used in ExtractedContent
-	const themeMappings: ContentThemeMapping[] = validMappings.map((m) => ({
-		mainThemeId: m.mainThemeId,
-		miniThemeId: m.miniThemeId,
-		relevanceScore: m.relevanceScore,
-		reasoning: m.reasoning,
-	}));
+		// Convert to the format used in ExtractedContent
+		const themeMappings: ContentThemeMapping[] = validMappings.map((m) => ({
+			mainThemeId: m.mainThemeId,
+			miniThemeId: m.miniThemeId,
+			relevanceScore: m.relevanceScore,
+			reasoning: m.reasoning,
+		}));
 
-	return {
-		...content,
-		themes: themeMappings,
-		multiUse: content.multiUse || checkMultiTheme(validMappings),
-		updatedAt: new Date().toISOString(),
-	};
+		return {
+			...content,
+			themes: themeMappings,
+			multiUse: content.multiUse || checkMultiTheme(validMappings),
+			updatedAt: new Date().toISOString(),
+		};
+	} catch (error) {
+		// Log the error and return unclassified content
+		console.warn(
+			`Classification failed for content ${content.id}, returning unclassified:`,
+			error
+		);
+		return content;
+	}
 }
 
 /**
@@ -127,19 +143,25 @@ async function classifyBatch(
 	const prompt = createBatchClassificationPrompt(contents, themes);
 
 	try {
-		const result = await generateObject({
+		const { output: batchResult } = await generateText({
 			model,
-			schema: BatchClassificationResultSchema,
+			output: Output.object({
+				schema: BatchClassificationResultSchema,
+			}),
 			system: CLASSIFICATION_SYSTEM_PROMPT,
 			prompt,
 		});
 
+		if (!batchResult) {
+			throw new Error("Batch classification returned null output");
+		}
+
 		// Map classifications back to content items
-		return mapClassificationsToContent(contents, result.object);
+		return mapClassificationsToContent(contents, batchResult);
 	} catch (error) {
 		// Fall back to individual classification on batch failure
-		console.error(
-			"Batch classification failed, falling back to individual:",
+		console.warn(
+			`Batch classification failed for ${contents.length} items, falling back to individual:`,
 			error
 		);
 		return classifyIndividually(contents, themes);
@@ -148,6 +170,7 @@ async function classifyBatch(
 
 /**
  * Falls back to classifying items individually.
+ * classifyContent now handles errors internally and returns unclassified content on failure.
  */
 async function classifyIndividually(
 	contents: ExtractedContent[],
@@ -156,13 +179,8 @@ async function classifyIndividually(
 	const results: ExtractedContent[] = [];
 
 	for (const content of contents) {
-		try {
-			const classified = await classifyContent(content, themes);
-			results.push(classified);
-		} catch (error) {
-			console.error(`Failed to classify content ${content.id}:`, error);
-			results.push(content); // Return unclassified on failure
-		}
+		const classified = await classifyContent(content, themes);
+		results.push(classified);
 	}
 
 	return results;

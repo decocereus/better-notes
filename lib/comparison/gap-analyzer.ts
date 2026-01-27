@@ -4,7 +4,7 @@
  * Identifies what the user is missing compared to toppers.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	COMPARISON_SYSTEM_PROMPT,
@@ -316,14 +316,20 @@ async function identifyGapsWithLLM(
 	});
 
 	try {
-		const result = await generateObject({
+		const { output } = await generateText({
 			model,
-			schema: GapAnalysisResultSchema,
+			output: Output.object({
+				schema: GapAnalysisResultSchema,
+			}),
 			system: COMPARISON_SYSTEM_PROMPT,
 			prompt,
 		});
 
-		return sortGapsBySeverity(result.object.gaps);
+		if (!output) {
+			return identifyStatisticalGaps(userContent, topperContent);
+		}
+
+		return sortGapsBySeverity(output.gaps);
 	} catch (error) {
 		console.error("LLM gap analysis failed:", error);
 		// Fall back to statistical gap analysis
@@ -520,14 +526,20 @@ export async function getReadinessAssessment(
 	);
 
 	try {
-		const result = await generateObject({
+		const { output } = await generateText({
 			model,
-			schema: ReadinessAssessmentSchema,
+			output: Output.object({
+				schema: ReadinessAssessmentSchema,
+			}),
 			system: COMPARISON_SYSTEM_PROMPT,
 			prompt,
 		});
 
-		return result.object;
+		if (!output) {
+			throw new Error("Readiness assessment returned null");
+		}
+
+		return output;
 	} catch (error) {
 		console.error("Readiness assessment failed:", error);
 		// Return a default assessment

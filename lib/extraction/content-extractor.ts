@@ -4,7 +4,7 @@
  * Uses LLM with structured output to extract intros, examples, quotes, etc.
  */
 
-import { generateObject, generateText } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	createExtractionPrompt,
@@ -458,6 +458,7 @@ function parseItemsFromText(
  * @param parameters - Extraction configuration parameters
  * @param sourceRef - Reference to the source (R2 key or Notion page ID)
  * @param essayTitle - Optional title of the essay
+ * @param modelFactory - Optional factory to create fresh model instance (for chunk isolation)
  * @returns Extracted content items
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Multi-fallback LLM extraction requires nested error handling
@@ -465,7 +466,8 @@ export async function extractContentFromEssay(
 	essayText: string,
 	parameters: ExtractionParameters,
 	sourceRef: string,
-	essayTitle?: string
+	essayTitle?: string,
+	modelFactory?: () => ReturnType<typeof getModel>
 ): Promise<{ items: ExtractedContent[]; sections: ExtractionSection[] }> {
 	// Skip very short essays
 	const wordCount = essayText.split(WORD_SPLIT_REGEX).filter(Boolean).length;
@@ -473,21 +475,26 @@ export async function extractContentFromEssay(
 		return { items: [], sections: [] };
 	}
 
-	const model = getModel("EXTRACTION");
+	// Use factory for fresh instance if provided, otherwise default model
+	const model = modelFactory ? modelFactory() : getModel("EXTRACTION");
 	const prompt = createExtractionPrompt(essayText, parameters, essayTitle);
 
 	let extractedItems: ExtractedItem[] = [];
 	let extractedSections: ExtractionSection[] = [];
 
 	try {
-		const result = await generateObject({
+		const { output: result } = await generateText({
 			model,
-			schema: ExtractionResultSchema,
+			output: Output.object({
+				schema: ExtractionResultSchema,
+			}),
 			system: EXTRACTION_SYSTEM_PROMPT,
 			prompt,
 		});
-		extractedItems = result.object.items;
-		extractedSections = normalizeSections(result.object.sections);
+		if (result) {
+			extractedItems = result.items;
+			extractedSections = normalizeSections(result.sections);
+		}
 	} catch (error) {
 		const errorText =
 			error && typeof error === "object" && "text" in error
@@ -604,6 +611,7 @@ const MAX_CONCURRENCY = 5;
  * @param sourceRef - Source reference
  * @param onProgress - Progress callback
  * @param concurrency - Number of parallel extractions (default: 3, max: 5)
+ * @param modelFactory - Optional factory for fresh model instances
  * @returns Array of extraction results per essay
  */
 export async function extractContentBatch(
@@ -616,7 +624,8 @@ export async function extractContentBatch(
 	parameters: ExtractionParameters,
 	sourceRef: string,
 	onProgress?: (processed: number, total: number) => void,
-	concurrency: number = DEFAULT_CONCURRENCY
+	concurrency: number = DEFAULT_CONCURRENCY,
+	modelFactory?: () => ReturnType<typeof getModel>
 ): Promise<EssayExtractionResult[]> {
 	const effectiveConcurrency = Math.min(
 		Math.max(1, concurrency),
@@ -625,7 +634,13 @@ export async function extractContentBatch(
 
 	// For small batches, use sequential processing
 	if (essays.length <= effectiveConcurrency) {
-		return extractContentSequential(essays, parameters, sourceRef, onProgress);
+		return extractContentSequential(
+			essays,
+			parameters,
+			sourceRef,
+			onProgress,
+			modelFactory
+		);
 	}
 
 	// Split essays into batches for parallel processing
@@ -636,7 +651,13 @@ export async function extractContentBatch(
 	// Process batches with controlled concurrency
 	for (const batch of batches) {
 		const batchPromises = batch.map(({ essay, originalIndex }) =>
-			extractSingleEssay(essay, originalIndex, parameters, sourceRef)
+			extractSingleEssay(
+				essay,
+				originalIndex,
+				parameters,
+				sourceRef,
+				modelFactory
+			)
 		);
 
 		const batchResults = await Promise.allSettled(batchPromises);
@@ -677,7 +698,8 @@ async function extractContentSequential(
 	}>,
 	parameters: ExtractionParameters,
 	sourceRef: string,
-	onProgress?: (processed: number, total: number) => void
+	onProgress?: (processed: number, total: number) => void,
+	modelFactory?: () => ReturnType<typeof getModel>
 ): Promise<EssayExtractionResult[]> {
 	const results: EssayExtractionResult[] = [];
 
@@ -685,7 +707,13 @@ async function extractContentSequential(
 		const essay = essays[i];
 
 		try {
-			const result = await extractSingleEssay(essay, i, parameters, sourceRef);
+			const result = await extractSingleEssay(
+				essay,
+				i,
+				parameters,
+				sourceRef,
+				modelFactory
+			);
 			results.push(result);
 		} catch (error) {
 			console.error(`Failed to extract from essay ${i + 1}:`, error);
@@ -705,14 +733,20 @@ async function extractSingleEssay(
 	essay: { text: string; startPage: number; endPage: number; title?: string },
 	essayIndex: number,
 	parameters: ExtractionParameters,
-	sourceRef: string
+	sourceRef: string,
+	modelFactory?: () => ReturnType<typeof getModel>
 ): Promise<EssayExtractionResult> {
+	const startTime = Date.now();
+
 	const { items, sections } = await extractContentFromEssay(
 		essay.text,
 		parameters,
 		sourceRef,
-		essay.title
+		essay.title,
+		modelFactory
 	);
+
+	const processingTimeMs = Date.now() - startTime;
 
 	const itemsWithMeta = items.map((item) => ({
 		...item,
@@ -723,6 +757,25 @@ async function extractSingleEssay(
 	}));
 
 	const wordCount = essay.text.split(WORD_SPLIT_REGEX).filter(Boolean).length;
+	const overallQuality = calculateOverallQuality(items);
+
+	// Determine extraction notes based on quality and item count
+	let extractionNotes = "Standard extraction";
+	if (items.length === 0) {
+		extractionNotes = "No items extracted - possible parsing failure";
+	} else if (items.length < 3) {
+		extractionNotes = "Minimal extraction - possible content quality issues";
+	} else if (overallQuality === "high" && items.length >= 8) {
+		extractionNotes = "Rich extraction with detailed patterns";
+	}
+
+	// Calculate confidence based on quality
+	let extractionConfidence = 0.3;
+	if (overallQuality === "high") {
+		extractionConfidence = 0.9;
+	} else if (overallQuality === "medium") {
+		extractionConfidence = 0.6;
+	}
 
 	return {
 		essayTitle: essay.title,
@@ -730,8 +783,13 @@ async function extractSingleEssay(
 		endPage: essay.endPage,
 		items: itemsWithMeta,
 		sections,
-		overallQuality: calculateOverallQuality(items),
+		overallQuality,
 		wordCount,
+		// NEW: Essay-level metadata for quality tracking
+		extractionConfidence,
+		extractionNotes,
+		processingTimeMs,
+		itemsExtracted: items.length,
 	};
 }
 

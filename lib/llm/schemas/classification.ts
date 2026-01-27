@@ -49,9 +49,16 @@ export const ContentClassificationSchema = z.object({
 		.optional()
 		.describe("The most relevant theme (highest score)"),
 
+	// Accept both field names since LLM may return either
 	classificationConfidence: z
 		.enum(["high", "medium", "low"])
+		.optional()
 		.describe("Confidence in the classification"),
+
+	confidence: z
+		.enum(["high", "medium", "low"])
+		.optional()
+		.describe("Alternative field name for confidence"),
 
 	notes: z
 		.string()
@@ -90,13 +97,17 @@ export type BatchClassificationResult = z.infer<
 /**
  * Schema for single-item classification result.
  * Used when classifying one content item at a time.
+ * All fields except mappings are optional since we only use mappings.
  */
 export const SingleClassificationResultSchema = z.object({
 	mappings: z
 		.array(ThemeMappingSchema)
 		.describe("Theme mappings for the content"),
 
-	isMultiTheme: z.boolean().describe("True if content applies to 3+ themes"),
+	isMultiTheme: z
+		.boolean()
+		.optional()
+		.describe("True if content applies to 3+ themes"),
 
 	primaryTheme: z
 		.object({
@@ -108,7 +119,14 @@ export const SingleClassificationResultSchema = z.object({
 
 	confidence: z
 		.enum(["high", "medium", "low"])
+		.optional()
 		.describe("Classification confidence"),
+
+	// Allow LLM to use alternative field names
+	classificationConfidence: z
+		.enum(["high", "medium", "low"])
+		.optional()
+		.describe("Alternative field name for confidence"),
 });
 
 export type SingleClassificationResult = z.infer<

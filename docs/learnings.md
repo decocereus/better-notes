@@ -439,12 +439,37 @@ Document discoveries, gotchas, and solutions encountered during development.
 **Solution:** Define query type with `Record<string, never>` for args: `FunctionReference<"query", "public", Record<string, never>, unknown>`
 **Lesson:** Use `Record<string, never>` (not `object` or `{}`) for Convex queries that take no arguments
 
-### 2026-01-23 - Vercel AI SDK generateObject for Structured Extraction
+### 2026-01-23 - Vercel AI SDK generateObject for Structured Extraction (DEPRECATED)
 
 **Context:** Extracting structured content from essays using LLM
 **Problem:** Need type-safe structured output from LLM (not just text)
-**Solution:** Use `generateObject` from `ai` package with Zod schema - it validates and returns typed object
-**Lesson:** `generateObject({ model, schema, system, prompt })` is the pattern for structured LLM output - define schema with Zod
+**Solution:** ~~Use `generateObject` from `ai` package with Zod schema~~ **DEPRECATED in AI SDK v6**
+**Updated:** Use `generateText` with `output: Output.object({ schema })` instead. See 2026-01-27 entry.
+
+### 2026-01-27 - AI SDK v6 Migration: generateObject → generateText with Output.object
+
+**Context:** AI SDK v6 deprecated `generateObject` and `streamObject`
+**Problem:** Codebase used deprecated `generateObject` pattern across 8 files
+**Solution:** Migrate to new pattern using `generateText` with `output` property:
+```typescript
+// Old (deprecated):
+const result = await generateObject({ model, schema, system, prompt });
+const data = result.object;
+
+// New (AI SDK v6):
+const { output } = await generateText({
+  model,
+  output: Output.object({ schema }),
+  system,
+  prompt,
+});
+if (!output) throw new Error("Output is null");
+```
+**Lesson:**
+- `Output.object()`, `Output.array()`, `Output.choice()`, and `Output.json()` are the new patterns
+- Always null-check the `output` since structured output can fail
+- The new pattern is more composable (can combine with tool calling)
+- Import `{ Output, generateText }` from "ai"
 
 ### 2026-01-23 - Cognitive Complexity with Filter Functions
 

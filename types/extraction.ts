@@ -171,6 +171,16 @@ export interface EssayExtractionResult {
 	sections?: ExtractionSection[];
 	overallQuality: ContentQuality;
 	wordCount: number;
+
+	// Essay-level quality metadata for tracking extraction performance
+	/** Confidence score 0-1 based on item quality and count */
+	extractionConfidence?: number;
+	/** Human-readable notes about extraction quality */
+	extractionNotes?: string;
+	/** Processing time in milliseconds */
+	processingTimeMs?: number;
+	/** Number of items actually extracted */
+	itemsExtracted?: number;
 }
 
 /**

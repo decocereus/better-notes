@@ -4,7 +4,7 @@
  * Uses LLM to intelligently trim over-limit content.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import { createCondensationPrompt } from "@/lib/llm/prompts/generation";
 import { CondensedSectionSchema } from "@/lib/llm/schemas/generation";
@@ -104,18 +104,24 @@ export async function condenseSection(
 		theme
 	);
 
-	const result = await generateObject({
+	const { output } = await generateText({
 		model,
-		schema: CondensedSectionSchema,
+		output: Output.object({
+			schema: CondensedSectionSchema,
+		}),
 		system: CONDENSATION_SYSTEM_PROMPT,
 		prompt,
 	});
 
+	if (!output) {
+		throw new Error("Condensation returned null output");
+	}
+
 	// Return updated section
 	return {
-		content: result.object.content,
+		content: output.content,
 		items: section.items, // Keep original items structure (could update with removed items)
-		wordCount: result.object.wordCount,
+		wordCount: output.wordCount,
 		itemCount: section.itemCount,
 	};
 }

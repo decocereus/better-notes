@@ -4,7 +4,7 @@
  * Uses LLM with structured output to generate Your Notes + Topper Insights.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	createNoteGenerationPrompt,
@@ -73,16 +73,22 @@ export async function generateNotesForTheme(
 		config
 	);
 
-	const result = await generateObject({
+	const { output } = await generateText({
 		model,
-		schema: GeneratedNoteOutputSchema,
+		output: Output.object({
+			schema: GeneratedNoteOutputSchema,
+		}),
 		system: GENERATION_SYSTEM_PROMPT,
 		prompt,
 	});
 
+	if (!output) {
+		throw new Error("Note generation returned null output");
+	}
+
 	// Convert LLM output to GeneratedNote format
 	return convertToGeneratedNote(
-		result.object,
+		output,
 		mainTheme,
 		miniTheme,
 		userContent,

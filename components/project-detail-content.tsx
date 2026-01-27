@@ -10,6 +10,7 @@ import {
 	MoreVertical,
 	Pencil,
 	Plus,
+	Sparkles,
 	Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AddSourceDialog } from "@/components/add-source-dialog";
 import { AddThemePageDialog } from "@/components/add-theme-page-dialog";
+import { ProjectWorkflow } from "@/components/project-workflow";
 import { SourceList } from "@/components/source-list";
 import {
 	AlertDialog,
@@ -49,12 +51,15 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import type { Asset } from "@/types/asset";
 import type { ContentSource, Project } from "@/types/project";
+import type { MainTheme } from "@/types/theme";
 
 interface ThemePage {
 	_id: string;
 	id: string;
 	title: string;
+	themes: MainTheme[];
 	stats: {
 		mainThemes: number;
 		miniThemes: number;
@@ -82,6 +87,12 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			? { id: project.themePageId as Id<"themePages"> }
 			: "skip"
 	) as ThemePage | null | undefined;
+
+	// Query assets for this project (for the workflow)
+	const assets = useQuery(
+		api.assets.listByProject,
+		projectId ? { projectId: projectId as Id<"projects"> } : "skip"
+	);
 
 	const removeProject = useMutation(api.projects.remove);
 	const removeSource = useMutation(api.projects.removeSource);
@@ -399,6 +410,15 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 				)}
 			</Card>
 
+			{/* Workflow Section: Classification, Comparison, Notes */}
+			{themePage && (
+				<WorkflowSection
+					assets={assets}
+					projectId={projectId}
+					themePage={themePage}
+				/>
+			)}
+
 			{/* Delete Source Confirmation */}
 			<AlertDialog
 				onOpenChange={(open) => !open && setDeleteSourceId(null)}
@@ -479,4 +499,62 @@ async function deleteFileFromR2Storage(key: string): Promise<void> {
 		const errorData = await response.json();
 		throw new Error(errorData.error || "Failed to delete file from storage");
 	}
+}
+
+// Workflow section component to avoid nested ternaries
+interface WorkflowSectionProps {
+	assets: Asset[] | undefined;
+	projectId: string;
+	themePage: ThemePage;
+}
+
+function WorkflowSection({
+	assets,
+	projectId,
+	themePage,
+}: WorkflowSectionProps) {
+	// Loading state
+	if (assets === undefined) {
+		return (
+			<Card className="p-6">
+				<h3 className="mb-4 font-medium text-lg">Analysis Workflow</h3>
+				<div className="flex items-center gap-3 py-4 text-muted-foreground">
+					<div className="rounded-full bg-muted p-2">
+						<div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+					</div>
+					<p>Loading content sources...</p>
+				</div>
+			</Card>
+		);
+	}
+
+	// Empty state
+	if (assets.length === 0) {
+		return (
+			<Card className="p-6">
+				<h3 className="mb-4 font-medium text-lg">Analysis Workflow</h3>
+				<div className="flex flex-col items-center justify-center py-8 text-center">
+					<div className="mb-4 rounded-full bg-muted p-4">
+						<Sparkles className="size-8 text-muted-foreground" />
+					</div>
+					<p className="text-muted-foreground">
+						Add content sources to start the analysis workflow
+					</p>
+					<p className="mt-1 max-w-md text-muted-foreground text-sm">
+						Upload PDFs or connect Notion pages to extract and classify content
+					</p>
+				</div>
+			</Card>
+		);
+	}
+
+	// Active workflow
+	return (
+		<ProjectWorkflow
+			assets={assets}
+			projectId={projectId}
+			themePageId={themePage.id}
+			themes={themePage.themes as MainTheme[]}
+		/>
+	);
 }

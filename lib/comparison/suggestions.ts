@@ -4,7 +4,7 @@
  * Helps users understand what specific actions to take.
  */
 
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { getModel } from "@/lib/ai/client";
 import {
 	COMPARISON_SYSTEM_PROMPT,
@@ -88,15 +88,21 @@ export async function generateSuggestionsWithLLM(
 	});
 
 	try {
-		const result = await generateObject({
+		const { output } = await generateText({
 			model,
-			schema: SuggestionResultSchema,
+			output: Output.object({
+				schema: SuggestionResultSchema,
+			}),
 			system: COMPARISON_SYSTEM_PROMPT,
 			prompt,
 		});
 
+		if (!output) {
+			return [];
+		}
+
 		// Convert LLM suggestions to typed suggestions
-		return result.object.suggestions
+		return output.suggestions
 			.slice(0, MAX_SUGGESTIONS)
 			.map((s, index) => convertToComparisonSuggestion(s, index));
 	} catch (error) {

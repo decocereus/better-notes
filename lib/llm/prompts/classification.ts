@@ -32,7 +32,24 @@ CLASSIFICATION CRITERIA:
 OUTPUT REQUIREMENTS:
 - Only include themes with relevance score >= 0.5
 - Provide brief reasoning for each classification
-- Flag content that applies to 3+ themes as "multi-theme"`;
+- Flag content that applies to 3+ themes as "multi-theme"
+
+OUTPUT FORMAT:
+You MUST output ONLY a valid JSON object. Do not include any introductory text, explanations, or markdown formatting. Output raw JSON only.
+
+REQUIRED JSON STRUCTURE:
+{
+  "mappings": [
+    {
+      "mainThemeId": "string - exact ID from theme hierarchy",
+      "miniThemeId": "string - exact ID from theme hierarchy",
+      "relevanceScore": "number between 0.5 and 1.0",
+      "reasoning": "string - brief explanation"
+    }
+  ],
+  "isMultiTheme": "boolean - true if 3+ themes",
+  "confidence": "string - 'high', 'medium', or 'low'"
+}`;
 
 /**
  * Creates a theme hierarchy summary for the prompt.
@@ -68,7 +85,7 @@ export function createClassificationPrompt(
 ): string {
 	const themeHierarchy = formatThemeHierarchy(themes);
 
-	return `Classify the following content into the theme hierarchy below.
+	return `Classify the following content into the theme hierarchy.
 
 === CONTENT TO CLASSIFY ===
 Type: ${content.contentType}
@@ -82,17 +99,27 @@ Multi-use: ${content.multiUse ? "Yes" : "No"}
 === THEME HIERARCHY ===${themeHierarchy}
 === END THEME HIERARCHY ===
 
-Classify this content into relevant themes. For each applicable theme:
-1. Identify the main theme and mini-theme
-2. Assign a relevance score (0.5-1.0)
-3. Provide brief reasoning
+CLASSIFICATION RULES:
+- Classify this content into ALL relevant themes (score >= 0.5)
+- Include mappings array with mainThemeId and miniThemeId from the hierarchy above
+- isMultiTheme should be true if content applies to 3+ themes
+- Set confidence to "high", "medium", or "low"
 
-Consider:
-- Does the content directly address the theme?
-- Could it be used as an example or argument in essays on this theme?
-- Is there conceptual overlap or tangential relevance?
+OUTPUT FORMAT - Return ONLY this exact JSON structure:
+{
+  "mappings": [
+    {
+      "mainThemeId": "theme-id-from-hierarchy",
+      "miniThemeId": "mini-theme-id-from-hierarchy",
+      "relevanceScore": 0.85,
+      "reasoning": "Brief explanation of why this content fits this theme"
+    }
+  ],
+  "isMultiTheme": true,
+  "confidence": "high"
+}
 
-Output all themes with relevance >= 0.5.`;
+IMPORTANT: Use the exact field names shown above: "mappings", "mainThemeId", "miniThemeId", "isMultiTheme", "confidence"`;
 }
 
 /**
@@ -108,9 +135,9 @@ export function createBatchClassificationPrompt(
 	const contentList = contents
 		.map(
 			(c, i) => `
-[${i + 1}] Type: ${c.contentType}${c.exampleCategory ? ` (${c.exampleCategory})` : ""}
-Content: ${c.content.slice(0, 200)}${c.content.length > 200 ? "..." : ""}
-ID: ${c.id}`
+[${i + 1}] ID: ${c.id}
+Type: ${c.contentType}${c.exampleCategory ? ` (${c.exampleCategory})` : ""}
+Content: ${c.content.slice(0, 200)}${c.content.length > 200 ? "..." : ""}`
 		)
 		.join("\n");
 
@@ -122,12 +149,35 @@ ID: ${c.id}`
 === THEME HIERARCHY ===${themeHierarchy}
 === END THEME HIERARCHY ===
 
-For each content item (referenced by ID), classify into all relevant themes with:
-- mainThemeId and miniThemeId
-- relevanceScore (0.5-1.0)
-- brief reasoning
+CLASSIFICATION RULES:
+- Classify each content item into ALL relevant themes (score >= 0.5)
+- Use the exact IDs from the theme hierarchy above
+- Mark as multiTheme if content applies to 3+ themes
+- Set confidence to "high", "medium", or "low"
 
-Only include classifications with relevance >= 0.5.`;
+OUTPUT FORMAT - Return ONLY this exact JSON structure:
+{
+  "classifications": [
+    {
+      "contentId": "content-id-from-list",
+      "mappings": [
+        {
+          "mainThemeId": "theme-id-from-hierarchy",
+          "miniThemeId": "mini-theme-id-from-hierarchy",
+          "relevanceScore": 0.85,
+          "reasoning": "Brief explanation"
+        }
+      ],
+      "isMultiTheme": true,
+      "confidence": "high"
+    }
+  ],
+  "totalItems": ${contents.length},
+  "multiThemeCount": 0,
+  "averageMappingsPerItem": 0
+}
+
+IMPORTANT: Use the exact field names shown above: "mappings", "mainThemeId", "miniThemeId", "isMultiTheme", "confidence"`;
 }
 
 /**
