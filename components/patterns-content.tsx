@@ -153,7 +153,9 @@ export function PatternsContent() {
 		{
 			jobId: activeJobId,
 			onCompleted: () => {
-				loadExtractedItems().catch(() => {});
+				loadExtractedItems().catch(() => {
+					// Ignore refresh failures after completion; users can retry manually.
+				});
 				setActiveJobId(null);
 			},
 			onError: (message) => {
@@ -166,7 +168,9 @@ export function PatternsContent() {
 	// Initial load
 	useEffect(() => {
 		if (isHydrated) {
-			loadExtractedItems().catch(() => {});
+			loadExtractedItems().catch(() => {
+				// Ignore initial load failures; error state is handled elsewhere.
+			});
 		}
 	}, [isHydrated, loadExtractedItems]);
 

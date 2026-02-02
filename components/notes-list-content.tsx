@@ -1,7 +1,14 @@
 "use client";
 
-import { Cloud, FileText, Loader2, Search, Sparkles } from "lucide-react";
-import { useState } from "react";
+import {
+	Cloud,
+	FileText,
+	Loader2,
+	RefreshCw,
+	Search,
+	Sparkles,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 import { RevisionNoteCompact } from "@/components/revision-note";
 import { BulkSyncStatus } from "@/components/sync-status";
@@ -14,14 +21,63 @@ import type { GeneratedNote, SyncResult } from "@/types/generation";
 
 /**
  * Client component for displaying list of generated notes.
- * In a real implementation, this would fetch notes from storage.
- * For now, we display a placeholder with the UI structure.
+ * Loads persisted notes from storage and renders grouped summaries.
  */
 export function NotesListContent() {
 	const { settings, isHydrated } = useSettings();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [notes, setNotes] = useState<GeneratedNote[]>([]);
 	const [selectedNote, setSelectedNote] = useState<GeneratedNote | null>(null);
+	const [isLoading, setIsLoading] = useState(false);
+	const [loadError, setLoadError] = useState<string | null>(null);
+
+	const persistNote = useCallback(async (note: GeneratedNote) => {
+		if (!note.projectId) {
+			return;
+		}
+
+		try {
+			await fetch("/api/notes", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ note }),
+			});
+		} catch {
+			// Ignore persistence errors in list view
+		}
+	}, []);
+
+	const fetchNotes = useCallback(async () => {
+		setIsLoading(true);
+		setLoadError(null);
+
+		try {
+			const response = await fetch("/api/notes");
+			const data = (await response.json()) as {
+				success: boolean;
+				notes?: GeneratedNote[];
+				error?: string;
+			};
+
+			if (!(response.ok && data.success)) {
+				throw new Error(data.error || "Failed to load notes");
+			}
+
+			setNotes(data.notes ?? []);
+		} catch (error) {
+			setLoadError(
+				error instanceof Error ? error.message : "Failed to load notes"
+			);
+		} finally {
+			setIsLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		if (isHydrated) {
+			fetchNotes();
+		}
+	}, [fetchNotes, isHydrated]);
 
 	// Filter notes by search query
 	const filteredNotes = notes.filter(
@@ -45,21 +101,25 @@ export function NotesListContent() {
 
 	const handleBulkSyncComplete = (results: SyncResult[]) => {
 		// Update notes with sync results
-		setNotes((prev) =>
-			prev.map((note) => {
+		setNotes((prev) => {
+			const updatedNotes = prev.map((note) => {
 				const result = results.find((r) => r.noteId === note.id);
 				if (result) {
-					return {
+					const updatedNote = {
 						...note,
 						syncStatus: "synced" as const,
 						syncedAt: result.syncedAt,
 						notionPageId: result.notionPageId,
 						notionBlockIds: result.blockIds,
 					};
+					persistNote(updatedNote);
+					return updatedNote;
 				}
 				return note;
-			})
-		);
+			});
+
+			return updatedNotes;
+		});
 	};
 
 	if (!isHydrated) {
@@ -72,6 +132,14 @@ export function NotesListContent() {
 
 	// Render notes list content
 	const renderNotesContent = () => {
+		if (isLoading) {
+			return <LoadingState />;
+		}
+
+		if (loadError) {
+			return <ErrorState error={loadError} onRetry={fetchNotes} />;
+		}
+
 		if (notes.length === 0) {
 			return <EmptyState />;
 		}
@@ -167,6 +235,32 @@ function EmptyState() {
 			</p>
 			<Button asChild className="mt-4" variant="outline">
 				<a href="/themes">Browse Themes</a>
+			</Button>
+		</Card>
+	);
+}
+
+function LoadingState() {
+	return (
+		<div className="flex items-center justify-center py-12">
+			<Loader2 className="size-8 animate-spin text-muted-foreground" />
+		</div>
+	);
+}
+
+function ErrorState({
+	error,
+	onRetry,
+}: {
+	error: string;
+	onRetry: () => void;
+}) {
+	return (
+		<Card className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+			<p className="text-muted-foreground text-sm">{error}</p>
+			<Button onClick={onRetry} size="sm" variant="outline">
+				<RefreshCw className="mr-2 size-4" />
+				Retry
 			</Button>
 		</Card>
 	);

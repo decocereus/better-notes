@@ -65,7 +65,7 @@ export async function generateNotesForTheme(
 	topperContent: ExtractedContent[],
 	config: GenerationConfig
 ): Promise<GeneratedNote> {
-	const model = getModel("EXTRACTION"); // Using Sonnet for high-quality generation
+	const model = getModel("EXTRACTION"); // OpenRouter default model for generation
 	const prompt = createNoteGenerationPrompt(
 		userContent,
 		topperContent,

@@ -56,46 +56,10 @@ export interface TaskDefinition {
  */
 export const AVAILABLE_MODELS: AvailableModel[] = [
 	{
-		id: "anthropic/claude-sonnet-4",
-		name: "Claude Sonnet 4",
+		id: "moonshotai/kimi-k2.5",
+		name: "Kimi K2.5",
 		capabilities: ["text", "vision"],
-		description: "Latest Claude model, excellent for complex analysis",
-	},
-	{
-		id: "anthropic/claude-3.5-sonnet",
-		name: "Claude 3.5 Sonnet",
-		capabilities: ["text", "vision"],
-		description: "Strong reasoning and analysis capabilities",
-	},
-	{
-		id: "anthropic/claude-3-haiku",
-		name: "Claude 3 Haiku",
-		capabilities: ["text"],
-		description: "Fast and cost-effective for simpler tasks",
-	},
-	{
-		id: "google/gemini-2.0-flash-001",
-		name: "Gemini 2.0 Flash",
-		capabilities: ["text", "vision"],
-		description: "Fast multimodal model, good for OCR",
-	},
-	{
-		id: "google/gemini-2.5-flash-preview",
-		name: "Gemini 2.5 Flash Preview",
-		capabilities: ["text", "vision"],
-		description: "Latest Gemini flash model with improved capabilities",
-	},
-	{
-		id: "openai/gpt-4o",
-		name: "GPT-4o",
-		capabilities: ["text", "vision"],
-		description: "OpenAI's flagship multimodal model",
-	},
-	{
-		id: "openai/gpt-4o-mini",
-		name: "GPT-4o Mini",
-		capabilities: ["text", "vision"],
-		description: "Cost-effective GPT-4 variant",
+		description: "Moonshot AI's Kimi K2.5 model for all tasks",
 	},
 ] as const;
 
@@ -140,11 +104,11 @@ export const TASK_DEFINITIONS: TaskDefinition[] = [
  * Maps task ID to model ID.
  */
 export const DEFAULT_MODEL_CONFIG: Record<TaskType, string> = {
-	ocr: "google/gemini-2.0-flash-001",
-	pattern_extraction: "anthropic/claude-sonnet-4",
-	classification: "anthropic/claude-3-haiku",
-	comparison: "anthropic/claude-sonnet-4",
-	generation: "anthropic/claude-sonnet-4",
+	ocr: "moonshotai/kimi-k2.5",
+	pattern_extraction: "moonshotai/kimi-k2.5",
+	classification: "moonshotai/kimi-k2.5",
+	comparison: "moonshotai/kimi-k2.5",
+	generation: "moonshotai/kimi-k2.5",
 } as const;
 
 /**

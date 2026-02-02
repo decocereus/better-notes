@@ -39,9 +39,11 @@ import type { MainTheme } from "@/types/theme";
  */
 interface ClassifyRequestBody {
 	/** Extraction job ID to get content from */
-	extractionJobId: string;
+	extractionJobId?: string;
 	/** Convex theme page ID (from themePages table) */
 	themePageId: string;
+	/** Project ID to aggregate all completed assets */
+	projectId?: string;
 }
 
 /**
@@ -50,6 +52,8 @@ interface ClassifyRequestBody {
 interface ClassificationJobResults {
 	jobId: string;
 	extractionJobId: string;
+	extractionJobIds?: string[];
+	projectId?: string;
 	themePageId: string;
 	themes: MainTheme[];
 	classifiedContent: ExtractedContent[];
@@ -110,21 +114,11 @@ function validateConfigurations(): NextResponse | null {
  */
 function validateRequestBody(body: ClassifyRequestBody): {
 	error: NextResponse | null;
-	extractionJobId: string;
+	extractionJobId?: string;
 	themePageId: string;
+	projectId?: string;
 } {
-	const { extractionJobId, themePageId } = body;
-
-	if (!extractionJobId) {
-		return {
-			error: NextResponse.json(
-				{ error: "extractionJobId is required" },
-				{ status: 400 }
-			),
-			extractionJobId: "",
-			themePageId: "",
-		};
-	}
+	const { extractionJobId, themePageId, projectId } = body;
 
 	if (!themePageId) {
 		return {
@@ -134,10 +128,23 @@ function validateRequestBody(body: ClassifyRequestBody): {
 			),
 			extractionJobId,
 			themePageId: "",
+			projectId,
 		};
 	}
 
-	return { error: null, extractionJobId, themePageId };
+	if (!(extractionJobId || projectId)) {
+		return {
+			error: NextResponse.json(
+				{ error: "extractionJobId or projectId is required" },
+				{ status: 400 }
+			),
+			extractionJobId,
+			themePageId,
+			projectId,
+		};
+	}
+
+	return { error: null, extractionJobId, themePageId, projectId };
 }
 
 /**
@@ -209,6 +216,87 @@ async function loadThemesFromConvex(
 }
 
 /**
+ * Loads and aggregates extraction results for all completed assets in a project.
+ */
+async function loadProjectExtractionResults(projectId: string): Promise<{
+	content: ExtractedContent[] | null;
+	extractionJobIds: string[];
+	error: NextResponse | null;
+}> {
+	try {
+		const convex = getConvexClient();
+		const assets = await convex.query(api.assets.listByProject, {
+			projectId: projectId as Id<"projects">,
+		});
+
+		const completedAssets = assets.filter(
+			(asset) =>
+				asset.processingStatus === "extraction_completed" &&
+				asset.extractionJobId
+		);
+
+		if (completedAssets.length === 0) {
+			return {
+				content: null,
+				extractionJobIds: [],
+				error: NextResponse.json(
+					{ error: "No completed assets found for this project" },
+					{ status: 400 }
+				),
+			};
+		}
+
+		const extractionJobIds = completedAssets
+			.map((asset) => asset.extractionJobId)
+			.filter((id): id is string => Boolean(id));
+
+		const results = await Promise.all(
+			extractionJobIds.map(async (jobId) => ({
+				jobId,
+				result: await loadExtractionResults(jobId),
+			}))
+		);
+
+		const missingJobIds: string[] = [];
+		const aggregatedContent: ExtractedContent[] = [];
+
+		for (const { jobId, result } of results) {
+			if (result.content) {
+				aggregatedContent.push(...result.content);
+			} else {
+				missingJobIds.push(jobId);
+			}
+		}
+
+		if (missingJobIds.length > 0) {
+			return {
+				content: null,
+				extractionJobIds,
+				error: NextResponse.json(
+					{
+						error: "Failed to load extraction results for some assets",
+						missingJobIds,
+					},
+					{ status: 500 }
+				),
+			};
+		}
+
+		return { content: aggregatedContent, extractionJobIds, error: null };
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: "Failed to load project extraction results";
+		return {
+			content: null,
+			extractionJobIds: [],
+			error: NextResponse.json({ error: message }, { status: 500 }),
+		};
+	}
+}
+
+/**
  * Asset info returned from Convex.
  */
 interface AssetInfo {
@@ -269,6 +357,137 @@ async function isExtractionComplete(extractionJobId: string): Promise<{
 	return { complete: false, job };
 }
 
+interface ExtractionContext {
+	extractedContent: ExtractedContent[];
+	extractionJobIds: string[];
+	sourceKey: string;
+	projectId?: string;
+}
+
+interface ExtractionContextResult {
+	context: ExtractionContext | null;
+	error: NextResponse | null;
+}
+
+async function loadProjectExtractionContext(
+	projectId: string
+): Promise<ExtractionContextResult> {
+	const projectResults = await loadProjectExtractionResults(projectId);
+	if (projectResults.error || !projectResults.content) {
+		return {
+			context: null,
+			error:
+				projectResults.error ??
+				NextResponse.json(
+					{ error: "Failed to load project extraction results" },
+					{ status: 500 }
+				),
+		};
+	}
+
+	return {
+		context: {
+			extractedContent: projectResults.content,
+			extractionJobIds: projectResults.extractionJobIds,
+			sourceKey: `project:${projectId}`,
+			projectId,
+		},
+		error: null,
+	};
+}
+
+async function loadJobExtractionContext(
+	extractionJobId: string
+): Promise<ExtractionContextResult> {
+	const extractionCheck = await isExtractionComplete(extractionJobId);
+
+	if (!extractionCheck.complete) {
+		if (!extractionCheck.job) {
+			return {
+				context: null,
+				error: NextResponse.json(
+					{ error: "Extraction job not found" },
+					{ status: 404 }
+				),
+			};
+		}
+
+		return {
+			context: null,
+			error: NextResponse.json(
+				{
+					error: "Extraction job not completed",
+					status:
+						extractionCheck.asset?.processingStatus ||
+						extractionCheck.job.status,
+					progress: extractionCheck.job.progress,
+				},
+				{ status: 400 }
+			),
+		};
+	}
+
+	const extractionResult = await loadExtractionResults(extractionJobId);
+	if (extractionResult.error || !extractionResult.content) {
+		return {
+			context: null,
+			error:
+				extractionResult.error ??
+				NextResponse.json(
+					{ error: "Failed to load extraction results" },
+					{ status: 500 }
+				),
+		};
+	}
+
+	const sourceKey =
+		extractionCheck.job?.sourceKey ?? extractionCheck.asset?.key;
+	if (!sourceKey) {
+		return {
+			context: null,
+			error: NextResponse.json(
+				{ error: "Cannot determine source key for classification" },
+				{ status: 500 }
+			),
+		};
+	}
+
+	return {
+		context: {
+			extractedContent: extractionResult.content,
+			extractionJobIds: [extractionJobId],
+			sourceKey,
+			projectId:
+				extractionCheck.job?.projectId ?? extractionCheck.asset?.projectId,
+		},
+		error: null,
+	};
+}
+
+async function resolveExtractionContext({
+	projectId,
+	extractionJobId,
+}: {
+	projectId?: string;
+	extractionJobId?: string;
+}): Promise<ExtractionContextResult> {
+	if (projectId) {
+		return await loadProjectExtractionContext(projectId);
+	}
+
+	if (extractionJobId) {
+		return await loadJobExtractionContext(extractionJobId);
+	}
+
+	return {
+		context: null,
+		error: NextResponse.json(
+			{ error: "extractionJobId or projectId is required" },
+			{ status: 400 }
+		),
+	};
+}
+
 /**
  * POST /api/classify
  * Starts a new classification job.
@@ -288,44 +507,28 @@ export async function POST(request: NextRequest) {
 			return validation.error;
 		}
 
-		const { extractionJobId, themePageId } = validation;
+		const { extractionJobId, themePageId, projectId } = validation;
 
-		// Verify extraction is completed (check both job and asset status)
-		const extractionCheck = await isExtractionComplete(extractionJobId);
-
-		if (!extractionCheck.complete) {
-			// Not complete - return appropriate error
-			if (!extractionCheck.job) {
-				return NextResponse.json(
-					{ error: "Extraction job not found" },
-					{ status: 404 }
-				);
-			}
-
-			return NextResponse.json(
-				{
-					error: "Extraction job not completed",
-					status:
-						extractionCheck.asset?.processingStatus ||
-						extractionCheck.job.status,
-					progress: extractionCheck.job.progress,
-				},
-				{ status: 400 }
-			);
-		}
-
-		// Load extraction results
-		const extractionResult = await loadExtractionResults(extractionJobId);
-		if (extractionResult.error || !extractionResult.content) {
+		const extractionContext = await resolveExtractionContext({
+			projectId,
+			extractionJobId,
+		});
+		if (extractionContext.error || !extractionContext.context) {
 			return (
-				extractionResult.error ??
+				extractionContext.error ??
 				NextResponse.json(
-					{ error: "Failed to load extraction results" },
+					{ error: "Failed to resolve extraction context" },
 					{ status: 500 }
 				)
 			);
 		}
-		const extractedContent = extractionResult.content;
+
+		const {
+			extractedContent,
+			extractionJobIds,
+			sourceKey,
+			projectId: resolvedProjectId,
+		} = extractionContext.context;
 
 		// Load themes from Convex
 		const themesResult = await loadThemesFromConvex(themePageId);
@@ -337,34 +540,22 @@ export async function POST(request: NextRequest) {
 		}
 		const themes = themesResult.themes;
 
-		// Get source key and project ID from job or asset
-		const sourceKey =
-			extractionCheck.job?.sourceKey ?? extractionCheck.asset?.key;
-		const projectId =
-			extractionCheck.job?.projectId ?? extractionCheck.asset?.projectId;
-
-		if (!sourceKey) {
-			return NextResponse.json(
-				{ error: "Cannot determine source key for classification" },
-				{ status: 500 }
-			);
-		}
-
 		// Create the classification job
 		const job = await createJob(
 			"classification",
 			sourceKey,
-			projectId,
+			resolvedProjectId,
 			extractedContent.length
 		);
 
 		// Start processing in the background
 		processClassificationJob(
 			job.id,
-			extractionJobId,
+			extractionJobIds,
 			themePageId,
 			extractedContent,
-			themes
+			themes,
+			resolvedProjectId
 		).catch((error) => {
 			console.error(`Classification job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
@@ -374,8 +565,10 @@ export async function POST(request: NextRequest) {
 			{
 				jobId: job.id,
 				status: job.status,
-				extractionJobId,
+				extractionJobId: extractionJobIds[0],
+				extractionJobIds,
 				themePageId,
+				projectId: resolvedProjectId,
 				totalItems: extractedContent.length,
 				totalThemes: themes.length,
 			},
@@ -469,10 +662,11 @@ export async function GET(request: NextRequest) {
  */
 async function processClassificationJob(
 	jobId: string,
-	extractionJobId: string,
+	extractionJobIds: string[],
 	themePageId: string,
 	content: ExtractedContent[],
-	themes: MainTheme[]
+	themes: MainTheme[],
+	projectId?: string
 ) {
 	// Classify content in batches
 	const classifiedContent = await classifyContentBatch(
@@ -495,7 +689,9 @@ async function processClassificationJob(
 	// Build full results
 	const fullResults: ClassificationJobResults = {
 		jobId,
-		extractionJobId,
+		extractionJobId: extractionJobIds[0] ?? "unknown",
+		extractionJobIds,
+		projectId,
 		themePageId,
 		themes,
 		classifiedContent: contentWithMultiUse,

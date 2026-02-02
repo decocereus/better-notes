@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type Dispatch, type SetStateAction, useState } from "react";
 import { AddSourceDialog } from "@/components/add-source-dialog";
 import { AddThemePageDialog } from "@/components/add-theme-page-dialog";
 import { ProjectWorkflow } from "@/components/project-workflow";
@@ -71,6 +71,145 @@ interface ProjectDetailContentProps {
 	projectId: string;
 }
 
+type RemoveSourceMutation = (args: {
+	id: Id<"contentSources">;
+}) => Promise<unknown>;
+
+type RemoveProjectMutation = (args: { id: Id<"projects"> }) => Promise<unknown>;
+
+type UpdateProjectMutation = (args: {
+	id: Id<"projects">;
+	themePageId: Id<"themePages">;
+}) => Promise<unknown>;
+
+interface RouterHandle {
+	push: (href: string) => void;
+}
+
+async function deleteProjectSource({
+	deleteSourceId,
+	project,
+	removeSource,
+	setDeleteSourceId,
+	setIsDeletingSource,
+	setError,
+}: {
+	deleteSourceId: string | null;
+	project: Project | null | undefined;
+	removeSource: RemoveSourceMutation;
+	setDeleteSourceId: Dispatch<SetStateAction<string | null>>;
+	setIsDeletingSource: Dispatch<SetStateAction<boolean>>;
+	setError: Dispatch<SetStateAction<string | null>>;
+}): Promise<void> {
+	if (!deleteSourceId) {
+		return;
+	}
+
+	setIsDeletingSource(true);
+	setError(null);
+
+	try {
+		const source = project?.sources.find((s) => s.id === deleteSourceId);
+		if (source && shouldDeleteFromR2Storage(source)) {
+			await deleteFileFromR2Storage(source.reference);
+		}
+
+		await removeSource({ id: deleteSourceId as Id<"contentSources"> });
+		setDeleteSourceId(null);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "Failed to delete source");
+	} finally {
+		setIsDeletingSource(false);
+	}
+}
+
+async function deleteProjectAndRedirect({
+	projectId,
+	removeProject,
+	router,
+	setError,
+	setIsDeletingProject,
+	setShowDeleteProject,
+}: {
+	projectId: string;
+	removeProject: RemoveProjectMutation;
+	router: RouterHandle;
+	setError: Dispatch<SetStateAction<string | null>>;
+	setIsDeletingProject: Dispatch<SetStateAction<boolean>>;
+	setShowDeleteProject: Dispatch<SetStateAction<boolean>>;
+}): Promise<void> {
+	setIsDeletingProject(true);
+	setError(null);
+
+	try {
+		await removeProject({ id: projectId as Id<"projects"> });
+		router.push("/projects");
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "Failed to delete project");
+		setIsDeletingProject(false);
+		setShowDeleteProject(false);
+	}
+}
+
+async function applyThemePageUpdate({
+	projectId,
+	themePageId,
+	updateProject,
+	setError,
+	setIsUpdatingTheme,
+}: {
+	projectId: string;
+	themePageId: Id<"themePages">;
+	updateProject: UpdateProjectMutation;
+	setError: Dispatch<SetStateAction<string | null>>;
+	setIsUpdatingTheme: Dispatch<SetStateAction<boolean>>;
+}): Promise<void> {
+	setIsUpdatingTheme(true);
+	setError(null);
+
+	try {
+		await updateProject({
+			id: projectId as Id<"projects">,
+			themePageId,
+		});
+	} catch (err) {
+		setError(
+			err instanceof Error ? err.message : "Failed to update theme page"
+		);
+	} finally {
+		setIsUpdatingTheme(false);
+	}
+}
+
+async function updateThemePageSelection({
+	projectId,
+	value,
+	updateProject,
+	setError,
+	setIsUpdatingTheme,
+	setShowAddThemePage,
+}: {
+	projectId: string;
+	value: string;
+	updateProject: UpdateProjectMutation;
+	setError: Dispatch<SetStateAction<string | null>>;
+	setIsUpdatingTheme: Dispatch<SetStateAction<boolean>>;
+	setShowAddThemePage: Dispatch<SetStateAction<boolean>>;
+}): Promise<void> {
+	if (value === "add-new") {
+		setShowAddThemePage(true);
+		return;
+	}
+
+	await applyThemePageUpdate({
+		projectId,
+		themePageId: value as Id<"themePages">,
+		updateProject,
+		setError,
+		setIsUpdatingTheme,
+	});
+}
+
 export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const router = useRouter();
 
@@ -106,83 +245,47 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const [showAddThemePage, setShowAddThemePage] = useState(false);
 	const [isUpdatingTheme, setIsUpdatingTheme] = useState(false);
 
-	const handleDeleteSource = async () => {
-		if (!deleteSourceId) {
-			return;
-		}
-
-		setIsDeletingSource(true);
-		setError(null);
-
-		try {
-			// Delete file from R2 storage if needed
-			const source = project?.sources.find((s) => s.id === deleteSourceId);
-			if (source && shouldDeleteFromR2Storage(source)) {
-				await deleteFileFromR2Storage(source.reference);
-			}
-
-			await removeSource({ id: deleteSourceId as Id<"contentSources"> });
-			setDeleteSourceId(null);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to delete source");
-		} finally {
-			setIsDeletingSource(false);
-		}
+	const handleDeleteSource = () => {
+		deleteProjectSource({
+			deleteSourceId,
+			project,
+			removeSource,
+			setDeleteSourceId,
+			setIsDeletingSource,
+			setError,
+		});
 	};
 
-	const handleDeleteProject = async () => {
-		setIsDeletingProject(true);
-		setError(null);
-
-		try {
-			await removeProject({ id: projectId as Id<"projects"> });
-			router.push("/projects");
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to delete project");
-			setIsDeletingProject(false);
-			setShowDeleteProject(false);
-		}
+	const handleDeleteProject = () => {
+		deleteProjectAndRedirect({
+			projectId,
+			removeProject,
+			router,
+			setError,
+			setIsDeletingProject,
+			setShowDeleteProject,
+		});
 	};
 
-	const handleThemePageChange = async (value: string) => {
-		if (value === "add-new") {
-			setShowAddThemePage(true);
-			return;
-		}
-
-		setIsUpdatingTheme(true);
-		setError(null);
-
-		try {
-			await updateProject({
-				id: projectId as Id<"projects">,
-				themePageId: value as Id<"themePages">,
-			});
-		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : "Failed to update theme page"
-			);
-		} finally {
-			setIsUpdatingTheme(false);
-		}
+	const handleThemePageChange = (value: string) => {
+		updateThemePageSelection({
+			projectId,
+			value,
+			updateProject,
+			setError,
+			setIsUpdatingTheme,
+			setShowAddThemePage,
+		});
 	};
 
-	const handleThemePageAdded = async (newThemePageId: Id<"themePages">) => {
-		setIsUpdatingTheme(true);
-		setError(null);
-
-		try {
-			await updateProject({
-				id: projectId as Id<"projects">,
-				themePageId: newThemePageId,
-			});
-		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : "Failed to update theme page"
-			);
-		} finally {
-			setIsUpdatingTheme(false);
-		}
+	const handleThemePageAdded = (newThemePageId: Id<"themePages">) => {
+		applyThemePageUpdate({
+			projectId,
+			themePageId: newThemePageId,
+			updateProject,
+			setError,
+			setIsUpdatingTheme,
+		});
 	};
 
 	const sourceToDelete = deleteSourceId
@@ -223,10 +326,6 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			</div>
 		);
 	}
-
-	// Check if theme page is missing (deleted)
-	const isThemePageMissing = project.themePageId && themePage === null;
-	const hasThemePages = themePages && themePages.length > 0;
 
 	return (
 		<div className="space-y-6">
@@ -288,85 +387,16 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			)}
 
 			{/* Theme Page Warning/Selection */}
-			{isThemePageMissing && (
-				<Card className="border-amber-500/50 bg-amber-500/10 p-4">
-					<div className="flex items-start gap-3">
-						<AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-500" />
-						<div className="flex-1 space-y-3">
-							<div>
-								<h4 className="font-medium text-amber-600 dark:text-amber-500">
-									Theme Page Unavailable
-								</h4>
-								<p className="text-muted-foreground text-sm">
-									The theme page for this project was deleted. Select a new one
-									to continue with classification.
-								</p>
-							</div>
-							<Select
-								disabled={isUpdatingTheme}
-								onValueChange={handleThemePageChange}
-								value=""
-							>
-								<SelectTrigger className="w-full max-w-sm">
-									<SelectValue placeholder="Select a theme page..." />
-								</SelectTrigger>
-								<SelectContent>
-									{hasThemePages ? (
-										<>
-											{themePages.map((page) => (
-												<SelectItem key={page.id} value={page.id}>
-													{page.title} ({page.stats.questions} questions)
-												</SelectItem>
-											))}
-											<SelectSeparator />
-											<SelectItem value="add-new">
-												<span className="flex items-center gap-2">
-													<Plus className="size-4" />
-													Add new theme page...
-												</span>
-											</SelectItem>
-										</>
-									) : (
-										<SelectItem value="add-new">
-											<span className="flex items-center gap-2">
-												<Plus className="size-4" />
-												Add your first theme page...
-											</span>
-										</SelectItem>
-									)}
-								</SelectContent>
-							</Select>
-						</div>
-					</div>
-				</Card>
-			)}
+			<ThemePageWarningCard
+				isUpdatingTheme={isUpdatingTheme}
+				onThemePageChange={handleThemePageChange}
+				projectThemePageId={project.themePageId}
+				themePage={themePage}
+				themePages={themePages}
+			/>
 
 			{/* Theme Page Info */}
-			{themePage && (
-				<Card className="p-4">
-					<div className="flex items-center gap-3">
-						<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-							<BookOpen className="size-5 text-primary" />
-						</div>
-						<div className="flex-1">
-							<Link
-								className="font-medium hover:underline"
-								href={`/themes/${themePage.id}`}
-							>
-								{themePage.title}
-							</Link>
-							<div className="flex flex-wrap gap-2">
-								<Badge className="text-xs" variant="secondary">
-									{themePage.stats.mainThemes} main themes
-								</Badge>
-								<Badge className="text-xs" variant="outline">
-									{themePage.stats.questions} questions
-								</Badge>
-							</div>
-						</div>
-					</div>
-				</Card>
-			)}
+			<ThemePageInfoCard themePage={themePage} />
 
 			{/* Content Sources Section */}
 			<Card className="p-6">
@@ -479,6 +509,119 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 				open={showAddThemePage}
 			/>
 		</div>
+	);
+}
+
+interface ThemePageWarningCardProps {
+	isUpdatingTheme: boolean;
+	onThemePageChange: (value: string) => void;
+	projectThemePageId?: string | null;
+	themePage: ThemePage | null | undefined;
+	themePages: ThemePage[] | undefined;
+}
+
+function ThemePageWarningCard({
+	isUpdatingTheme,
+	onThemePageChange,
+	projectThemePageId,
+	themePage,
+	themePages,
+}: ThemePageWarningCardProps) {
+	const isThemePageMissing = Boolean(projectThemePageId && themePage === null);
+	if (!isThemePageMissing) {
+		return null;
+	}
+
+	const pages = themePages ?? [];
+	const hasThemePages = pages.length > 0;
+
+	return (
+		<Card className="border-amber-500/50 bg-amber-500/10 p-4">
+			<div className="flex items-start gap-3">
+				<AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-500" />
+				<div className="flex-1 space-y-3">
+					<div>
+						<h4 className="font-medium text-amber-600 dark:text-amber-500">
+							Theme Page Unavailable
+						</h4>
+						<p className="text-muted-foreground text-sm">
+							The theme page for this project was deleted. Select a new one to
+							continue with classification.
+						</p>
+					</div>
+					<Select
+						disabled={isUpdatingTheme}
+						onValueChange={onThemePageChange}
+						value=""
+					>
+						<SelectTrigger className="w-full max-w-sm">
+							<SelectValue placeholder="Select a theme page..." />
+						</SelectTrigger>
+						<SelectContent>
+							{hasThemePages ? (
+								<>
+									{pages.map((page) => (
+										<SelectItem key={page.id} value={page.id}>
+											{page.title} ({page.stats.questions} questions)
+										</SelectItem>
+									))}
+									<SelectSeparator />
+									<SelectItem value="add-new">
+										<span className="flex items-center gap-2">
+											<Plus className="size-4" />
+											Add new theme page...
+										</span>
+									</SelectItem>
+								</>
+							) : (
+								<SelectItem value="add-new">
+									<span className="flex items-center gap-2">
+										<Plus className="size-4" />
+										Add your first theme page...
+									</span>
+								</SelectItem>
+							)}
+						</SelectContent>
+					</Select>
+				</div>
+			</div>
+		</Card>
+	);
+}
+
+interface ThemePageInfoCardProps {
+	themePage: ThemePage | null | undefined;
+}
+
+function ThemePageInfoCard({ themePage }: ThemePageInfoCardProps) {
+	if (!themePage) {
+		return null;
+	}
+
+	return (
+		<Card className="p-4">
+			<div className="flex items-center gap-3">
+				<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+					<BookOpen className="size-5 text-primary" />
+				</div>
+				<div className="flex-1">
+					<Link
+						className="font-medium hover:underline"
+						href={`/themes/${themePage.id}`}
+					>
+						{themePage.title}
+					</Link>
+					<div className="flex flex-wrap gap-2">
+						<Badge className="text-xs" variant="secondary">
+							{themePage.stats.mainThemes} main themes
+						</Badge>
+						<Badge className="text-xs" variant="outline">
+							{themePage.stats.questions} questions
+						</Badge>
+					</div>
+				</div>
+			</div>
+		</Card>
 	);
 }
 

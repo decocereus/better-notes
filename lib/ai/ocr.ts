@@ -2,8 +2,8 @@
  * OCR Service - Page-Image Based Processing
  *
  * Performs OCR on individual page images using multi-model fallback:
- * 1. Primary: Gemini Flash via @ai-sdk/google
- * 2. Fallback: Claude Sonnet via @ai-sdk/anthropic for retries
+ * 1. Primary: Kimi K2.5 via OpenRouter
+ * 2. Fallback: Kimi K2.5 via OpenRouter for retries
  *
  * This approach handles large PDFs by processing each page independently
  * after converting PDF to images.
@@ -252,7 +252,7 @@ export async function findLowConfidencePages(
 }
 
 /**
- * Retries OCR on specific pages using Claude Sonnet.
+ * Retries OCR on specific pages using the fallback model.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Retry loop with error handling and status tracking
 export async function retryPagesWithClaude(
@@ -264,7 +264,7 @@ export async function retryPagesWithClaude(
 	const config = validateOcrModelConfig();
 	if (!config.claudeAvailable) {
 		throw new Error(
-			"No Claude provider configured for retry (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)"
+			"No fallback model configured for retry (OPENROUTER_API_KEY is required)"
 		);
 	}
 
@@ -355,7 +355,7 @@ export async function runOcrPipeline(
 	retriedPages: number;
 	errors: string[];
 }> {
-	// Phase 1: Initial OCR with Gemini
+	// Phase 1: Initial OCR
 	onProgress?.("ocr", 0, 0);
 	const initialResult = await processOcrJob(
 		assetId,
@@ -387,7 +387,7 @@ export async function runOcrPipeline(
 
 	console.log(`[OCR] Found ${pagesToRetry.length} pages needing retry`);
 
-	// Phase 3: Retry with Claude
+	// Phase 3: Retry with fallback model
 	const retryResult = await retryPagesWithClaude(
 		assetId,
 		pagesToRetry.map((p) => p.pageNumber),

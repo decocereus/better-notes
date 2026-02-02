@@ -12,16 +12,16 @@ import { env } from "@/lib/env";
  * Using OpenRouter model identifiers.
  */
 export const MODELS = {
-	/** Gemini Flash 2.0 - Fast, good for OCR and bulk processing */
-	OCR: "google/gemini-2.0-flash-001",
-	/** Claude Sonnet - High quality for extraction and analysis */
-	EXTRACTION: "anthropic/claude-sonnet-4",
-	/** Claude Sonnet - Better structured output for classification */
-	CLASSIFICATION: "anthropic/claude-sonnet-4",
-	/** Claude Sonnet - High quality for comparison and gap analysis */
-	COMPARISON: "anthropic/claude-sonnet-4",
-	/** Claude Haiku - Fast and cheap for simple tasks */
-	SIMPLE: "anthropic/claude-3-5-haiku",
+	/** Kimi K2.5 - Used for all tasks */
+	OCR: "moonshotai/kimi-k2.5",
+	/** Kimi K2.5 - Used for all tasks */
+	EXTRACTION: "moonshotai/kimi-k2.5",
+	/** Kimi K2.5 - Used for all tasks */
+	CLASSIFICATION: "moonshotai/kimi-k2.5",
+	/** Kimi K2.5 - Used for all tasks */
+	COMPARISON: "moonshotai/kimi-k2.5",
+	/** Kimi K2.5 - Used for all tasks */
+	SIMPLE: "moonshotai/kimi-k2.5",
 } as const;
 
 export type ModelType = keyof typeof MODELS;

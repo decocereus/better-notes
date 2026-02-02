@@ -70,12 +70,8 @@ interface ComparisonState {
 // MAIN WORKFLOW COMPONENT
 // ============================================================================
 
-export function ProjectWorkflow({
-	projectId,
-	themePageId,
-	assets,
-	themes,
-}: ProjectWorkflowProps) {
+export function ProjectWorkflow(props: ProjectWorkflowProps) {
+	const { projectId: projectIdValue, themePageId, assets, themes } = props;
 	// Get assets by processing status
 	const completedAssets = assets.filter(
 		(a) => a.processingStatus === "extraction_completed"
@@ -157,7 +153,7 @@ export function ProjectWorkflow({
 		if (hasExtractedContent && classification.status === "idle") {
 			const checkExisting = async () => {
 				const savedJobId = localStorage.getItem(
-					`classification-job-${projectId}`
+					`classification-job-${projectIdValue}`
 				);
 				if (savedJobId) {
 					await pollClassificationStatus(savedJobId);
@@ -168,8 +164,8 @@ export function ProjectWorkflow({
 	}, [
 		hasExtractedContent,
 		classification.status,
-		projectId,
 		pollClassificationStatus,
+		projectIdValue,
 	]);
 
 	const startClassification = async () => {
@@ -188,19 +184,11 @@ export function ProjectWorkflow({
 		});
 
 		try {
-			// Use the first completed asset's extraction job
-			const asset = completedAssets[0];
-			const extractionJobId = asset.extractionJobId;
-
-			if (!extractionJobId) {
-				throw new Error("No extraction job found for asset");
-			}
-
 			const response = await fetch("/api/classify", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					extractionJobId,
+					projectId: projectIdValue,
 					themePageId,
 				}),
 			});
@@ -211,7 +199,7 @@ export function ProjectWorkflow({
 			}
 
 			const data = await response.json();
-			localStorage.setItem(`classification-job-${projectId}`, data.jobId);
+			localStorage.setItem(`classification-job-${projectIdValue}`, data.jobId);
 			pollClassificationStatus(data.jobId);
 		} catch (_error) {
 			setClassification((prev) => ({
@@ -403,6 +391,7 @@ export function ProjectWorkflow({
 					content={classification.results.classifiedContent}
 					getContentForTheme={getContentForTheme}
 					onCompare={startComparison}
+					projectId={projectIdValue}
 					themes={themes}
 				/>
 			)}
@@ -572,6 +561,7 @@ interface ComparisonSectionProps {
 	themes: MainTheme[];
 	content: ExtractedContent[];
 	comparisons: ComparisonState;
+	projectId: string;
 	onCompare: (mainTheme: MainTheme, miniTheme: MiniTheme) => void;
 	getContentForTheme: (
 		mainThemeId: string,
@@ -582,6 +572,7 @@ interface ComparisonSectionProps {
 function ComparisonSection({
 	themes,
 	comparisons,
+	projectId,
 	onCompare,
 	getContentForTheme,
 }: ComparisonSectionProps) {
@@ -691,6 +682,7 @@ function ComparisonSection({
 															onRecompare={() =>
 																onCompare(mainTheme, miniTheme)
 															}
+															projectId={projectId}
 														/>
 													)}
 												{comparison?.status === "processing" && (
@@ -746,6 +738,7 @@ interface ThemeActionsProps {
 	miniTheme: MiniTheme;
 	content: ExtractedContent[];
 	comparison: ThemeComparisonResult;
+	projectId: string;
 	onRecompare: () => void;
 }
 
@@ -754,6 +747,7 @@ function ThemeActions({
 	miniTheme,
 	content,
 	comparison,
+	projectId,
 	onRecompare,
 }: ThemeActionsProps) {
 	const [view, setView] = useState<"none" | "comparison" | "notes">("none");
@@ -819,6 +813,7 @@ function ThemeActions({
 						mainTheme={mainTheme}
 						miniTheme={miniTheme}
 						onNoteGenerated={handleNoteGenerated}
+						projectId={projectId}
 					/>
 				</div>
 			)}

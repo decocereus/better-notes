@@ -68,6 +68,236 @@ function splitIntoChunks<T>(items: T[], chunkSize: number): T[][] {
 	return chunks;
 }
 
+interface ChunkOutcomeSuccess {
+	success: true;
+	results: EssayExtractionResult[];
+	globalIndices: number[];
+}
+
+interface ChunkOutcomeFailure {
+	success: false;
+	error: Error;
+	globalIndices: number[];
+}
+
+type ChunkOutcome = ChunkOutcomeSuccess | ChunkOutcomeFailure;
+
+type ChunkProgressCallback = (
+	processedChunks: number,
+	totalChunks: number,
+	currentEssay: number,
+	totalEssays: number
+) => void;
+
+interface EssayChunkItem {
+	text: string;
+	startPage: number;
+	endPage: number;
+	title?: string;
+}
+
+function createEmptyStats(totalPages: number): ProcessingStats {
+	return {
+		totalEssays: 0,
+		successful: 0,
+		failed: 0,
+		retried: 0,
+		chunksProcessed: 0,
+		chunksFailed: 0,
+		totalPages,
+		pagesCovered: 0,
+		gaps: [],
+		errors: [],
+	};
+}
+
+function createProcessingStats(
+	totalEssays: number,
+	totalPages: number
+): ProcessingStats {
+	return {
+		totalEssays,
+		successful: 0,
+		failed: 0,
+		retried: 0,
+		chunksProcessed: 0,
+		chunksFailed: 0,
+		totalPages,
+		pagesCovered: 0,
+		gaps: [],
+		errors: [],
+	};
+}
+
+async function delayRetry(attempt: number): Promise<void> {
+	if (attempt <= 0) {
+		return;
+	}
+
+	await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+}
+
+function runChunkAttempt({
+	chunk,
+	chunkIndex,
+	retryCount,
+	parameters,
+	sourceRef,
+	startIndex,
+	totalChunks,
+	totalEssays,
+	onProgress,
+	log,
+}: {
+	chunk: EssayChunkItem[];
+	chunkIndex: number;
+	retryCount: number;
+	parameters: ExtractionParameters;
+	sourceRef: string;
+	startIndex: number;
+	totalChunks: number;
+	totalEssays: number;
+	onProgress?: ChunkProgressCallback;
+	log: (message: string, ...args: unknown[]) => void;
+}): Promise<EssayExtractionResult[]> {
+	const chunkModelFactory = () =>
+		getFreshModel("EXTRACTION", `${chunkIndex}-${retryCount}`);
+
+	log(`Creating fresh model instance for chunk ${chunkIndex + 1}`);
+
+	return extractContentBatch(
+		chunk,
+		parameters,
+		sourceRef,
+		(processed, _total) => {
+			const globalProcessed = startIndex + processed;
+			onProgress?.(chunkIndex, totalChunks, globalProcessed, totalEssays);
+		},
+		Math.min(5, chunk.length),
+		chunkModelFactory
+	);
+}
+
+async function processChunkWithRetries({
+	chunk,
+	chunkIndex,
+	startIndex,
+	totalChunks,
+	totalEssays,
+	parameters,
+	sourceRef,
+	fullConfig,
+	stats,
+	onProgress,
+	log,
+}: {
+	chunk: EssayChunkItem[];
+	chunkIndex: number;
+	startIndex: number;
+	totalChunks: number;
+	totalEssays: number;
+	parameters: ExtractionParameters;
+	sourceRef: string;
+	fullConfig: ChunkedProcessingConfig;
+	stats: ProcessingStats;
+	onProgress?: ChunkProgressCallback;
+	log: (message: string, ...args: unknown[]) => void;
+}): Promise<ChunkOutcome> {
+	const globalIndices = chunk.map((_, i) => startIndex + i);
+	let lastError: Error | null = null;
+
+	for (let attempt = 0; attempt <= fullConfig.maxRetries; attempt++) {
+		if (attempt > 0) {
+			log(
+				`Retrying chunk ${chunkIndex + 1}, attempt ${attempt + 1}/${fullConfig.maxRetries + 1}`
+			);
+			stats.retried++;
+			await delayRetry(attempt);
+		}
+
+		try {
+			const chunkResults = await runChunkAttempt({
+				chunk,
+				chunkIndex,
+				retryCount: attempt,
+				parameters,
+				sourceRef,
+				startIndex,
+				totalChunks,
+				totalEssays,
+				onProgress,
+				log,
+			});
+
+			return { success: true, results: chunkResults, globalIndices };
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+			log(
+				`Chunk ${chunkIndex + 1} failed (attempt ${attempt + 1}/${fullConfig.maxRetries + 1}):`,
+				lastError.message
+			);
+		}
+	}
+
+	const failure = lastError ?? new Error("Chunk failed with unknown error");
+	stats.chunksFailed++;
+	stats.errors.push({
+		chunkIndex,
+		essayIndices: globalIndices,
+		error: failure.message,
+	});
+
+	return { success: false, error: failure, globalIndices };
+}
+
+function applyChunkResults({
+	chunkResults,
+	startIndex,
+	allResults,
+	processedEssays,
+	stats,
+}: {
+	chunkResults: EssayExtractionResult[];
+	startIndex: number;
+	allResults: EssayExtractionResult[];
+	processedEssays: Set<number>;
+	stats: ProcessingStats;
+}): void {
+	for (let i = 0; i < chunkResults.length; i++) {
+		const globalIndex = startIndex + i;
+		allResults[globalIndex] = chunkResults[i];
+		processedEssays.add(globalIndex);
+
+		if (chunkResults[i].items.length > 0) {
+			stats.successful++;
+		}
+	}
+
+	stats.chunksProcessed++;
+}
+
+function recordChunkFailure({
+	chunk,
+	startIndex,
+	allResults,
+	processedEssays,
+	stats,
+}: {
+	chunk: EssayChunkItem[];
+	startIndex: number;
+	allResults: EssayExtractionResult[];
+	processedEssays: Set<number>;
+	stats: ProcessingStats;
+}): void {
+	for (let i = 0; i < chunk.length; i++) {
+		const globalIndex = startIndex + i;
+		if (!processedEssays.has(globalIndex)) {
+			allResults[globalIndex] = createFailedResult(chunk[i]);
+			stats.failed++;
+		}
+	}
+}
+
 /**
  * Processes essays from a large PDF in chunks with retry logic.
  *
@@ -125,18 +355,7 @@ export async function processEssaysInChunks(
 		log("WARNING: No essays detected!");
 		return {
 			results: [],
-			stats: {
-				totalEssays: 0,
-				successful: 0,
-				failed: 0,
-				retried: 0,
-				chunksProcessed: 0,
-				chunksFailed: 0,
-				totalPages: ocrResults.length,
-				pagesCovered: 0,
-				gaps: [],
-				errors: [],
-			},
+			stats: createEmptyStats(ocrResults.length),
 		};
 	}
 
@@ -156,18 +375,7 @@ export async function processEssaysInChunks(
 
 	// Step 4: Process each chunk with retry logic
 	const allResults: EssayExtractionResult[] = new Array(essays.length);
-	const stats: ProcessingStats = {
-		totalEssays: essays.length,
-		successful: 0,
-		failed: 0,
-		retried: 0,
-		chunksProcessed: 0,
-		chunksFailed: 0,
-		totalPages: ocrResults.length,
-		pagesCovered: 0,
-		gaps: [],
-		errors: [],
-	};
+	const stats = createProcessingStats(essays.length, ocrResults.length);
 
 	// Track which essays have been processed
 	const processedEssays = new Set<number>();
@@ -180,99 +388,44 @@ export async function processEssaysInChunks(
 			`Processing chunk ${chunkIndex + 1}/${chunks.length} (essays ${startIndex + 1}-${startIndex + chunk.length})`
 		);
 
-		let chunkSuccess = false;
-		let retryCount = 0;
-		let chunkError: Error | null = null;
+		const outcome = await processChunkWithRetries({
+			chunk,
+			chunkIndex,
+			startIndex,
+			totalChunks: chunks.length,
+			totalEssays: essays.length,
+			parameters,
+			sourceRef,
+			fullConfig,
+			stats,
+			onProgress,
+			log,
+		});
 
-		// Calculate global indices for this chunk
-		const globalIndices = chunk.map((_, i) => startIndex + i);
+		if (outcome.success) {
+			applyChunkResults({
+				chunkResults: outcome.results,
+				startIndex,
+				allResults,
+				processedEssays,
+				stats,
+			});
+			log(
+				`Chunk ${chunkIndex + 1} completed successfully (${outcome.results.length} essays)`
+			);
+		} else {
+			recordChunkFailure({
+				chunk,
+				startIndex,
+				allResults,
+				processedEssays,
+				stats,
+			});
 
-		while (!chunkSuccess && retryCount <= fullConfig.maxRetries) {
-			if (retryCount > 0) {
-				log(
-					`Retrying chunk ${chunkIndex + 1}, attempt ${retryCount + 1}/${fullConfig.maxRetries + 1}`
+			if (!fullConfig.continueOnFailure) {
+				throw new Error(
+					`Chunk ${chunkIndex + 1} failed after ${fullConfig.maxRetries} retries: ${outcome.error.message}`
 				);
-				stats.retried++;
-				// Add delay between retries
-				await new Promise((resolve) => setTimeout(resolve, 1000 * retryCount));
-			}
-
-			try {
-				// Create a FRESH model instance for this chunk
-				// This ensures each chunk gets full model attention without
-				// shortcut-taking from processing previous similar essays
-				const chunkModelFactory = () =>
-					getFreshModel("EXTRACTION", `${chunkIndex}-${retryCount}`);
-
-				log(`Creating fresh model instance for chunk ${chunkIndex + 1}`);
-
-				// Process this chunk with the fresh model
-				const chunkResults = await extractContentBatch(
-					chunk,
-					parameters,
-					sourceRef,
-					(processed, _total) => {
-						const globalProcessed = startIndex + processed;
-						onProgress?.(
-							chunkIndex,
-							chunks.length,
-							globalProcessed,
-							essays.length
-						);
-					},
-					// Use higher concurrency for chunks
-					Math.min(5, chunk.length),
-					chunkModelFactory
-				);
-
-				// Store results
-				for (let i = 0; i < chunkResults.length; i++) {
-					const globalIndex = startIndex + i;
-					allResults[globalIndex] = chunkResults[i];
-					processedEssays.add(globalIndex);
-
-					if (chunkResults[i].items.length > 0) {
-						stats.successful++;
-					}
-				}
-
-				chunkSuccess = true;
-				stats.chunksProcessed++;
-				log(
-					`Chunk ${chunkIndex + 1} completed successfully (${chunkResults.length} essays)`
-				);
-			} catch (error) {
-				chunkError = error instanceof Error ? error : new Error(String(error));
-				retryCount++;
-
-				log(
-					`Chunk ${chunkIndex + 1} failed (attempt ${retryCount}/${fullConfig.maxRetries + 1}):`,
-					chunkError.message
-				);
-
-				if (retryCount > fullConfig.maxRetries) {
-					stats.chunksFailed++;
-					stats.errors.push({
-						chunkIndex,
-						essayIndices: globalIndices,
-						error: chunkError.message,
-					});
-
-					// Create failed results for all essays in this chunk
-					for (let i = 0; i < chunk.length; i++) {
-						const globalIndex = startIndex + i;
-						if (!processedEssays.has(globalIndex)) {
-							allResults[globalIndex] = createFailedResult(chunk[i]);
-							stats.failed++;
-						}
-					}
-
-					if (!fullConfig.continueOnFailure) {
-						throw new Error(
-							`Chunk ${chunkIndex + 1} failed after ${fullConfig.maxRetries} retries: ${chunkError.message}`
-						);
-					}
-				}
 			}
 		}
 
@@ -362,12 +515,7 @@ function calculatePageCoverage(
 /**
  * Creates a failed result placeholder.
  */
-function createFailedResult(essay: {
-	text: string;
-	startPage: number;
-	endPage: number;
-	title?: string;
-}): EssayExtractionResult {
+function createFailedResult(essay: EssayChunkItem): EssayExtractionResult {
 	const wordCount = essay.text.split(WORD_SPLIT_REGEX).filter(Boolean).length;
 
 	return {

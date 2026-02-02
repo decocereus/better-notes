@@ -19,6 +19,8 @@ interface NoteGenerationPanelProps {
 	miniTheme: MiniTheme;
 	/** Content to generate notes from */
 	content: ExtractedContent[];
+	/** Project ID for persistence */
+	projectId?: string;
 	/** Existing generated note (if any) */
 	existingNote?: GeneratedNote | null;
 	/** Called when note is generated */
@@ -34,6 +36,7 @@ export function NoteGenerationPanel({
 	mainTheme,
 	miniTheme,
 	content,
+	projectId,
 	existingNote,
 	onNoteGenerated,
 	onNoteSynced,
@@ -42,6 +45,34 @@ export function NoteGenerationPanel({
 	const [note, setNote] = useState<GeneratedNote | null>(existingNote || null);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	const persistNote = useCallback(
+		async (noteToSave: GeneratedNote) => {
+			if (!projectId) {
+				return;
+			}
+
+			try {
+				const response = await fetch("/api/notes", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ note: noteToSave }),
+				});
+
+				if (!response.ok) {
+					const data = (await response.json()) as { error?: string };
+					throw new Error(data.error || "Failed to save note");
+				}
+			} catch (persistError) {
+				setError(
+					persistError instanceof Error
+						? persistError.message
+						: "Failed to save note"
+				);
+			}
+		},
+		[projectId]
+	);
 
 	const handleGenerate = useCallback(async () => {
 		if (content.length === 0) {
@@ -60,6 +91,7 @@ export function NoteGenerationPanel({
 					mainTheme,
 					miniTheme,
 					content,
+					projectId,
 					enforceConciseness: true,
 				}),
 			});
@@ -71,8 +103,12 @@ export function NoteGenerationPanel({
 			};
 
 			if (data.success && data.note) {
-				setNote(data.note);
-				onNoteGenerated?.(data.note);
+				const noteWithProject = projectId
+					? { ...data.note, projectId }
+					: data.note;
+				setNote(noteWithProject);
+				onNoteGenerated?.(noteWithProject);
+				await persistNote(noteWithProject);
 			} else {
 				setError(data.error || "Generation failed");
 			}
@@ -81,10 +117,10 @@ export function NoteGenerationPanel({
 		} finally {
 			setIsGenerating(false);
 		}
-	}, [mainTheme, miniTheme, content, onNoteGenerated]);
+	}, [content, mainTheme, miniTheme, onNoteGenerated, persistNote, projectId]);
 
 	const handleSyncComplete = useCallback(
-		(result: SyncResult) => {
+		async (result: SyncResult) => {
 			if (note) {
 				const updatedNote: GeneratedNote = {
 					...note,
@@ -95,13 +131,14 @@ export function NoteGenerationPanel({
 				};
 				setNote(updatedNote);
 				onNoteSynced?.(updatedNote);
+				await persistNote(updatedNote);
 			}
 		},
-		[note, onNoteSynced]
+		[note, onNoteSynced, persistNote]
 	);
 
 	const handleSyncError = useCallback(
-		(errorMessage: string) => {
+		async (errorMessage: string) => {
 			if (note) {
 				const updatedNote: GeneratedNote = {
 					...note,
@@ -109,9 +146,10 @@ export function NoteGenerationPanel({
 					error: errorMessage,
 				};
 				setNote(updatedNote);
+				await persistNote(updatedNote);
 			}
 		},
-		[note]
+		[note, persistNote]
 	);
 
 	const userContentCount = content.filter(

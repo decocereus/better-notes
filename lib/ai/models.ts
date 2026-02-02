@@ -1,26 +1,14 @@
 /**
  * Model selection helpers for OCR pipeline.
- * Provides access to Gemini Flash (primary) and Claude Sonnet (fallback).
+ * Uses OpenRouter with Kimi K2.5 for primary and fallback OCR.
  */
-
-import { anthropic } from "@ai-sdk/anthropic";
-import { google } from "@ai-sdk/google";
 import { getAIClient } from "@/lib/ai/client";
 import { env } from "@/lib/env";
 
 const OPENROUTER_MODELS = {
-	geminiFlash: "google/gemini-2.0-flash-001",
-	claudeSonnet: "anthropic/claude-sonnet-4",
+	geminiFlash: "moonshotai/kimi-k2.5",
+	claudeSonnet: "moonshotai/kimi-k2.5",
 } as const;
-
-const DIRECT_MODELS = {
-	geminiFlash: "gemini-2.0-flash-001",
-	claudeSonnet: "claude-sonnet-4-20250514",
-} as const;
-
-function shouldUseOpenRouter(): boolean {
-	return Boolean(env.OPENROUTER_API_KEY);
-}
 
 /**
  * OCR model types.
@@ -28,25 +16,17 @@ function shouldUseOpenRouter(): boolean {
 export type OcrModelType = "gemini-flash" | "claude-sonnet";
 
 /**
- * Gets the Gemini Flash model for primary OCR.
- * Fast and cost-effective for bulk processing.
+ * Gets the primary OCR model via OpenRouter.
  */
 export function getGeminiFlashModel() {
-	if (shouldUseOpenRouter()) {
-		return getAIClient()(OPENROUTER_MODELS.geminiFlash);
-	}
-	return google(DIRECT_MODELS.geminiFlash);
+	return getAIClient()(OPENROUTER_MODELS.geminiFlash);
 }
 
 /**
- * Gets the Claude Sonnet model for OCR retries.
- * Higher quality for difficult pages.
+ * Gets the fallback OCR model via OpenRouter.
  */
 export function getClaudeSonnetModel() {
-	if (shouldUseOpenRouter()) {
-		return getAIClient()(OPENROUTER_MODELS.claudeSonnet);
-	}
-	return anthropic(DIRECT_MODELS.claudeSonnet);
+	return getAIClient()(OPENROUTER_MODELS.claudeSonnet);
 }
 
 /**
@@ -72,15 +52,12 @@ export function validateOcrModelConfig(): {
 	error?: string;
 } {
 	const openRouterKey = env.OPENROUTER_API_KEY;
-	const geminiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-	const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
 	return {
-		geminiAvailable: Boolean(openRouterKey || geminiKey),
-		claudeAvailable: Boolean(openRouterKey || anthropicKey),
-		error:
-			openRouterKey || geminiKey || anthropicKey
-				? undefined
-				: "No OCR model API keys configured (OPENROUTER_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, or ANTHROPIC_API_KEY)",
+		geminiAvailable: Boolean(openRouterKey),
+		claudeAvailable: Boolean(openRouterKey),
+		error: openRouterKey
+			? undefined
+			: "OPENROUTER_API_KEY is required for OCR models",
 	};
 }

@@ -2,7 +2,7 @@
  * OCR Retry API
  *
  * POST /api/ocr/retry
- * Retries OCR on specific pages or all low-confidence pages using Claude.
+ * Retries OCR on specific pages or all low-confidence pages using the fallback model.
  *
  * Body: { assetId: string, pageNumbers?: number[] }
  */
@@ -43,18 +43,17 @@ async function updateAssetOcrWordCount(assetId: string, wordCount: number) {
 
 /**
  * POST /api/ocr/retry
- * Retries OCR on specific pages with Claude Sonnet.
+ * Retries OCR on specific pages with the fallback model.
  */
 export async function POST(request: NextRequest) {
 	try {
-		// Check Claude is available
+		// Check fallback model availability
 		const config = validateOcrModelConfig();
 		if (!config.claudeAvailable) {
 			return NextResponse.json(
 				{
-					error: "Claude not configured",
-					details:
-						"Retry requires a Claude provider (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)",
+					error: "Fallback model not configured",
+					details: "Retry requires OPENROUTER_API_KEY",
 				},
 				{ status: 503 }
 			);

@@ -14,6 +14,8 @@ interface GenerateRequest {
 	miniTheme: MiniTheme;
 	/** All extracted content for this theme (user + topper) */
 	content: ExtractedContent[];
+	/** Project ID for storage */
+	projectId?: string;
 	/** Optional custom configuration */
 	config?: Partial<GenerationConfig>;
 	/** Whether to enforce conciseness limits */
@@ -34,6 +36,7 @@ interface GenerateResponse {
  *   mainTheme: MainTheme,
  *   miniTheme: MiniTheme,
  *   content: ExtractedContent[],
+ *   projectId?: string,
  *   config?: Partial<GenerationConfig>,
  *   enforceConciseness?: boolean
  * }
@@ -48,6 +51,7 @@ export async function POST(
 			mainTheme,
 			miniTheme,
 			content,
+			projectId,
 			config: customConfig,
 			enforceConciseness = true,
 		} = body;
@@ -104,6 +108,10 @@ export async function POST(
 		// Enforce conciseness if enabled
 		if (enforceConciseness) {
 			note = await enforceNoteConciseness(note, { mainTheme, miniTheme });
+		}
+
+		if (projectId) {
+			note = { ...note, projectId };
 		}
 
 		return NextResponse.json({ success: true, note });

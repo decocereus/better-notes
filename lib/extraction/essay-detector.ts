@@ -325,6 +325,73 @@ async function detectBoundariesInBatch(
 /** Maximum retries for failed boundary detection batches */
 const MAX_BATCH_RETRIES = 2;
 
+interface PageBatch {
+	pages: OcrPageResult[];
+	startIndex: number;
+	endIndex: number;
+}
+
+async function delayBatchRetry(attempt: number): Promise<void> {
+	if (attempt <= 0) {
+		return;
+	}
+
+	await new Promise((resolve) =>
+		setTimeout(resolve, 1000 * 2 ** (attempt - 1))
+	);
+}
+
+async function detectBatchWithRetries({
+	batch,
+	batchIndex,
+	totalBatches,
+}: {
+	batch: PageBatch;
+	batchIndex: number;
+	totalBatches: number;
+}): Promise<{ boundaries: EssayBoundary[]; failed: boolean }> {
+	for (let attempt = 0; attempt <= MAX_BATCH_RETRIES; attempt++) {
+		if (attempt > 0) {
+			console.log(
+				`[EssayDetector] Retrying batch ${batchIndex + 1}/${totalBatches}, attempt ${attempt + 1}/${MAX_BATCH_RETRIES + 1}`
+			);
+			await delayBatchRetry(attempt);
+		}
+
+		try {
+			const boundaries = await detectBoundariesInBatch(batch.pages);
+			return { boundaries, failed: false };
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			console.error(
+				`[EssayDetector] Batch ${batchIndex + 1} failed (attempt ${attempt + 1}/${MAX_BATCH_RETRIES + 1}):`,
+				errorMessage
+			);
+
+			if (attempt === MAX_BATCH_RETRIES) {
+				console.error(
+					`[EssayDetector] Batch ${batchIndex + 1} failed permanently after ${MAX_BATCH_RETRIES + 1} attempts. Pages ${batch.startIndex + 1}-${batch.endIndex + 1} may have undetected essays.`
+				);
+				return { boundaries: [], failed: true };
+			}
+		}
+	}
+
+	return { boundaries: [], failed: true };
+}
+
+async function delayBetweenBatches(
+	batchIndex: number,
+	totalBatches: number
+): Promise<void> {
+	if (batchIndex >= totalBatches - 1) {
+		return;
+	}
+
+	await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
 /**
  * Processes large PDFs by splitting into batches and processing in parallel.
  * Includes retry logic for failed batches to ensure no pages are missed.
@@ -347,56 +414,22 @@ async function detectBoundariesChunked(
 
 	// Process batches with controlled concurrency and retry logic
 	const allBoundaries: EssayBoundary[][] = new Array(totalBatches);
-	let processedBatches = 0;
 	let failedBatches = 0;
 
-	for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-		const batch = batches[batchIndex];
-		let retryCount = 0;
-		let success = false;
+	for (const [batchIndex, batch] of batches.entries()) {
+		const { boundaries, failed } = await detectBatchWithRetries({
+			batch,
+			batchIndex,
+			totalBatches,
+		});
 
-		while (!success && retryCount <= MAX_BATCH_RETRIES) {
-			if (retryCount > 0) {
-				console.log(
-					`[EssayDetector] Retrying batch ${batchIndex + 1}/${totalBatches}, attempt ${retryCount + 1}/${MAX_BATCH_RETRIES + 1}`
-				);
-				// Add exponential backoff between retries
-				await new Promise((resolve) =>
-					setTimeout(resolve, 1000 * 2 ** (retryCount - 1))
-				);
-			}
-
-			try {
-				const boundaries = await detectBoundariesInBatch(batch.pages);
-				allBoundaries[batchIndex] = boundaries;
-				success = true;
-				processedBatches++;
-			} catch (error) {
-				retryCount++;
-				const errorMessage =
-					error instanceof Error ? error.message : String(error);
-				console.error(
-					`[EssayDetector] Batch ${batchIndex + 1} failed (attempt ${retryCount}/${MAX_BATCH_RETRIES + 1}):`,
-					errorMessage
-				);
-
-				if (retryCount > MAX_BATCH_RETRIES) {
-					// All retries exhausted
-					console.error(
-						`[EssayDetector] Batch ${batchIndex + 1} failed permanently after ${MAX_BATCH_RETRIES + 1} attempts. Pages ${batch.startIndex + 1}-${batch.endIndex + 1} may have undetected essays.`
-					);
-					allBoundaries[batchIndex] = [];
-					failedBatches++;
-				}
-			}
+		allBoundaries[batchIndex] = boundaries;
+		if (failed) {
+			failedBatches++;
 		}
 
-		onProgress?.(processedBatches, totalBatches);
-
-		// Add small delay between batches to avoid rate limits
-		if (batchIndex < totalBatches - 1) {
-			await new Promise((resolve) => setTimeout(resolve, 100));
-		}
+		onProgress?.(batchIndex + 1, totalBatches);
+		await delayBetweenBatches(batchIndex, totalBatches);
 	}
 
 	// Log summary
@@ -423,12 +456,8 @@ function createPageBatches(
 	ocrResults: OcrPageResult[],
 	batchSize: number,
 	overlapPages: number
-): Array<{ pages: OcrPageResult[]; startIndex: number; endIndex: number }> {
-	const batches: Array<{
-		pages: OcrPageResult[];
-		startIndex: number;
-		endIndex: number;
-	}> = [];
+): PageBatch[] {
+	const batches: PageBatch[] = [];
 
 	const step = batchSize - overlapPages;
 

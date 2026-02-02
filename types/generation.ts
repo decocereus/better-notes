@@ -99,6 +99,9 @@ export interface GeneratedNote {
 	/** Unique ID for this note */
 	id: string;
 
+	/** Project identifier for storage and retrieval */
+	projectId?: string;
+
 	/** Main theme identifiers */
 	mainThemeId: string;
 	mainThemeName: string;
@@ -141,6 +144,7 @@ export interface GeneratedNote {
  */
 export interface GeneratedNoteSummary {
 	id: string;
+	projectId?: string;
 	mainThemeId: string;
 	mainThemeName: string;
 	miniThemeId: string;

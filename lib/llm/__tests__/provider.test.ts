@@ -11,8 +11,8 @@ import {
 } from "../provider";
 
 describe("AVAILABLE_MODELS", () => {
-	it("contains at least 5 models", () => {
-		expect(AVAILABLE_MODELS.length).toBeGreaterThanOrEqual(5);
+	it("contains at least 1 model", () => {
+		expect(AVAILABLE_MODELS.length).toBeGreaterThanOrEqual(1);
 	});
 
 	it("each model has required fields", () => {
@@ -34,25 +34,11 @@ describe("AVAILABLE_MODELS", () => {
 		}
 	});
 
-	it("includes Claude models", () => {
-		const claudeModels = AVAILABLE_MODELS.filter((m) =>
-			m.id.includes("anthropic/claude")
+	it("includes Kimi models", () => {
+		const kimiModels = AVAILABLE_MODELS.filter((m) =>
+			m.id.includes("moonshotai/kimi")
 		);
-		expect(claudeModels.length).toBeGreaterThan(0);
-	});
-
-	it("includes Gemini models", () => {
-		const geminiModels = AVAILABLE_MODELS.filter((m) =>
-			m.id.includes("google/gemini")
-		);
-		expect(geminiModels.length).toBeGreaterThan(0);
-	});
-
-	it("includes GPT models", () => {
-		const gptModels = AVAILABLE_MODELS.filter((m) =>
-			m.id.includes("openai/gpt")
-		);
-		expect(gptModels.length).toBeGreaterThan(0);
+		expect(kimiModels.length).toBeGreaterThan(0);
 	});
 
 	it("has at least one model with vision capability", () => {
@@ -62,12 +48,11 @@ describe("AVAILABLE_MODELS", () => {
 		expect(visionModels.length).toBeGreaterThan(0);
 	});
 
-	it("has at least one model with text-only capability", () => {
-		const textOnlyModels = AVAILABLE_MODELS.filter(
-			(m) =>
-				m.capabilities.includes("text") && !m.capabilities.includes("vision")
+	it("has at least one model with text capability", () => {
+		const textModels = AVAILABLE_MODELS.filter((m) =>
+			m.capabilities.includes("text")
 		);
-		expect(textOnlyModels.length).toBeGreaterThan(0);
+		expect(textModels.length).toBeGreaterThan(0);
 	});
 });
 
@@ -152,15 +137,15 @@ describe("isValidModel", () => {
 	});
 
 	it("returns false for partial match", () => {
-		expect(isValidModel("anthropic")).toBe(false);
+		expect(isValidModel("moonshotai")).toBe(false);
 	});
 });
 
 describe("getModelById", () => {
 	it("returns model for valid ID", () => {
-		const model = getModelById("anthropic/claude-3-haiku");
+		const model = getModelById("moonshotai/kimi-k2.5");
 		expect(model).toBeDefined();
-		expect(model?.name).toBe("Claude 3 Haiku");
+		expect(model?.name).toBe("Kimi K2.5");
 	});
 
 	it("returns undefined for invalid ID", () => {

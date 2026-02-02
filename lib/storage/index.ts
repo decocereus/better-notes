@@ -3,6 +3,12 @@
  * @module lib/storage
  */
 
+export {
+	buildNoteStorageKey,
+	listNoteKeys,
+	loadNote,
+	storeNote,
+} from "./notes";
 // OCR results storage helpers
 export {
 	getAllOcrResults,

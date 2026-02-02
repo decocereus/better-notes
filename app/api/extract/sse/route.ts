@@ -42,6 +42,74 @@ type ExtractionEvent =
 	| { type: "error"; message: string; code?: string }
 	| { type: "ping" };
 
+type SendExtractionEvent = (event: ExtractionEvent) => void;
+
+interface PollIntervals {
+	pingInterval: ReturnType<typeof setInterval>;
+	pollInterval: ReturnType<typeof setInterval>;
+}
+
+function stopPolling(
+	controller: ReadableStreamDefaultController<Uint8Array>,
+	intervals: PollIntervals
+): void {
+	clearInterval(intervals.pollInterval);
+	clearInterval(intervals.pingInterval);
+	controller.close();
+}
+
+function emitProgressUpdate(
+	sendEvent: SendExtractionEvent,
+	job: Awaited<ReturnType<typeof getJob>>
+): void {
+	if (!job || job.status !== "processing" || job.totalItems <= 0) {
+		return;
+	}
+
+	sendEvent({
+		type: "progress",
+		progress: job.progress,
+		processedItems: job.processedItems,
+		totalItems: job.totalItems,
+		message: `Processing essay ${job.processedItems} of ${job.totalItems}`,
+	});
+}
+
+async function pollExtractionJobUpdate({
+	jobId,
+	sendEvent,
+	controller,
+	intervals,
+}: {
+	jobId: string;
+	sendEvent: SendExtractionEvent;
+	controller: ReadableStreamDefaultController<Uint8Array>;
+	intervals: PollIntervals;
+}): Promise<void> {
+	const currentJob = await getJob(jobId);
+	if (!currentJob) {
+		stopPolling(controller, intervals);
+		return;
+	}
+
+	emitProgressUpdate(sendEvent, currentJob);
+
+	if (currentJob.status === "completed") {
+		sendEvent({ type: "completed" });
+		stopPolling(controller, intervals);
+		return;
+	}
+
+	if (currentJob.status === "failed") {
+		sendEvent({
+			type: "error",
+			message: currentJob.errors[0]?.message || "Extraction failed",
+			code: "EXTRACTION_FAILED",
+		});
+		stopPolling(controller, intervals);
+	}
+}
+
 /**
  * GET /api/extract/sse?jobId=xxx
  * Establishes SSE connection for real-time extraction updates.
@@ -72,7 +140,7 @@ export async function GET(request: NextRequest) {
 			const encoder = new TextEncoder();
 
 			// Helper to send events
-			const sendEvent = (event: ExtractionEvent) => {
+			const sendEvent: SendExtractionEvent = (event) => {
 				const data = JSON.stringify(event);
 				controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 			};
@@ -85,15 +153,7 @@ export async function GET(request: NextRequest) {
 			});
 
 			// Send current progress if job is active
-			if (job.status === "processing" && job.totalItems > 0) {
-				sendEvent({
-					type: "progress",
-					progress: job.progress,
-					processedItems: job.processedItems,
-					totalItems: job.totalItems,
-					message: `Processing essay ${job.processedItems} of ${job.totalItems}`,
-				});
-			}
+			emitProgressUpdate(sendEvent, job);
 
 			// If already completed, send completion event
 			if (job.status === "completed") {
@@ -121,57 +181,20 @@ export async function GET(request: NextRequest) {
 			// Poll for updates until job completes or errors
 			const pollInterval = setInterval(async () => {
 				try {
-					const currentJob = await getJob(jobId);
-					if (!currentJob) {
-						clearInterval(pollInterval);
-						clearInterval(pingInterval);
-						controller.close();
-						return;
-					}
-
-					// Send progress update if changed
-					if (currentJob.status === "processing" && currentJob.totalItems > 0) {
-						sendEvent({
-							type: "progress",
-							progress: currentJob.progress,
-							processedItems: currentJob.processedItems,
-							totalItems: currentJob.totalItems,
-							message: `Processing essay ${currentJob.processedItems} of ${currentJob.totalItems}`,
-						});
-					}
-
-					// Handle completion
-					if (currentJob.status === "completed") {
-						clearInterval(pollInterval);
-						clearInterval(pingInterval);
-						sendEvent({ type: "completed" });
-						controller.close();
-						return;
-					}
-
-					// Handle failure
-					if (currentJob.status === "failed") {
-						clearInterval(pollInterval);
-						clearInterval(pingInterval);
-						sendEvent({
-							type: "error",
-							message: currentJob.errors[0]?.message || "Extraction failed",
-							code: "EXTRACTION_FAILED",
-						});
-						controller.close();
-						return;
-					}
+					await pollExtractionJobUpdate({
+						jobId,
+						sendEvent,
+						controller,
+						intervals: { pingInterval, pollInterval },
+					});
 				} catch (error) {
-					// Log error but keep polling
 					console.error("SSE poll error:", error);
 				}
 			}, 2000); // Poll every 2 seconds
 
 			// Cleanup on client disconnect
 			request.signal.addEventListener("abort", () => {
-				clearInterval(pollInterval);
-				clearInterval(pingInterval);
-				controller.close();
+				stopPolling(controller, { pingInterval, pollInterval });
 			});
 		},
 	});
