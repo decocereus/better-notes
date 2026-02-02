@@ -571,6 +571,8 @@ better-notes/
 9. **Comparison**: Select theme → See user vs topper content → Gap analysis
 10. **Note Generation**: Generate dual-section notes → Preview → Sync to Notion
 
+Validation checklist: see `docs/local-e2e.md` and `docs/e2e_todos.md`.
+
 ---
 
 ## Implementation Sequence
@@ -585,7 +587,10 @@ better-notes/
 - [x] LLM infrastructure (OpenRouter, model config)
 - [x] Dashboard with stats, quick actions
 
-### Phase 2: Processing Pipeline (IN PROGRESS)
+### Phase 2: Processing Pipeline (IMPLEMENTED — E2E validation pending)
+
+Status note: Core pipeline features are implemented. Remaining validation tasks
+and follow-ups are tracked in `docs/e2e_todos.md` and `docs/local-e2e.md`.
 
 #### Sprint 8: PDF Processing & OCR Infrastructure ✅ COMPLETED
 - [x] R2 storage client with signed URLs
@@ -604,27 +609,27 @@ better-notes/
 - [x] Markdown highlights per content type (ai-elements)
 - [x] Re-extract action (rerun extraction from OCR without reprocessing PDFs)
 
-#### Sprint 10: Theme Classification
-- [ ] Classification prompts and schemas
-- [ ] Cross-theme content handling
-- [ ] User content fetcher (from Notion)
-- [ ] Classification review/adjustment UI
-- [ ] Content aggregation per theme
+#### Sprint 10: Theme Classification ✅ IMPLEMENTED
+- [x] Classification prompts and schemas
+- [x] Cross-theme content handling
+- [x] User content fetcher (from Notion)
+- [x] Classification review/adjustment UI
+- [x] Content aggregation per theme
 
-#### Sprint 11: Comparison & Gap Analysis
-- [ ] Comparison prompts and logic
-- [ ] Per-theme comparison view
-- [ ] Gap analysis (user vs topper)
-- [ ] Missing content suggestions
-- [ ] Comparison results UI
+#### Sprint 11: Comparison & Gap Analysis ✅ IMPLEMENTED
+- [x] Comparison prompts and logic
+- [x] Per-theme comparison view
+- [x] Gap analysis (user vs topper)
+- [x] Missing content suggestions
+- [x] Comparison results UI
 
-#### Sprint 12: Note Generation & Notion Sync
-- [ ] Note generation prompts (dual-section)
-- [ ] Conciseness enforcement
-- [ ] Notes preview UI
-- [ ] Notion destination configuration
-- [ ] Notion sync (block builder)
-- [ ] Sync status tracking
+#### Sprint 12: Note Generation & Notion Sync ✅ IMPLEMENTED
+- [x] Note generation prompts (dual-section)
+- [x] Conciseness enforcement
+- [x] Notes preview UI
+- [x] Notion destination configuration
+- [x] Notion sync (block builder)
+- [x] Sync status tracking
 
 ### Phase 3: Writer Mode (FUTURE)
 - [ ] Essay upload and parsing

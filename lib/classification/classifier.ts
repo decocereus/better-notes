@@ -43,13 +43,14 @@ const MAX_BATCH_SIZE = 10;
  */
 export async function classifyContent(
 	content: ExtractedContent,
-	themes: MainTheme[]
+	themes: MainTheme[],
+	modelId?: string
 ): Promise<ExtractedContent> {
 	if (themes.length === 0) {
 		return content;
 	}
 
-	const model = getModel("CLASSIFICATION");
+	const model = getModel("CLASSIFICATION", modelId);
 	const prompt = createClassificationPrompt(content, themes);
 
 	try {
@@ -111,7 +112,8 @@ export async function classifyContent(
 export async function classifyContentBatch(
 	contents: ExtractedContent[],
 	themes: MainTheme[],
-	onProgress?: (processed: number, total: number) => void
+	onProgress?: (processed: number, total: number) => void,
+	modelId?: string
 ): Promise<ExtractedContent[]> {
 	if (themes.length === 0 || contents.length === 0) {
 		return contents;
@@ -123,7 +125,7 @@ export async function classifyContentBatch(
 	let processed = 0;
 
 	for (const batch of batches) {
-		const classifiedBatch = await classifyBatch(batch, themes);
+		const classifiedBatch = await classifyBatch(batch, themes, modelId);
 		results.push(...classifiedBatch);
 		processed += batch.length;
 		onProgress?.(processed, contents.length);
@@ -137,9 +139,10 @@ export async function classifyContentBatch(
  */
 async function classifyBatch(
 	contents: ExtractedContent[],
-	themes: MainTheme[]
+	themes: MainTheme[],
+	modelId?: string
 ): Promise<ExtractedContent[]> {
-	const model = getModel("CLASSIFICATION");
+	const model = getModel("CLASSIFICATION", modelId);
 	const prompt = createBatchClassificationPrompt(contents, themes);
 
 	try {
@@ -164,7 +167,7 @@ async function classifyBatch(
 			`Batch classification failed for ${contents.length} items, falling back to individual:`,
 			error
 		);
-		return classifyIndividually(contents, themes);
+		return classifyIndividually(contents, themes, modelId);
 	}
 }
 
@@ -174,12 +177,13 @@ async function classifyBatch(
  */
 async function classifyIndividually(
 	contents: ExtractedContent[],
-	themes: MainTheme[]
+	themes: MainTheme[],
+	modelId?: string
 ): Promise<ExtractedContent[]> {
 	const results: ExtractedContent[] = [];
 
 	for (const content of contents) {
-		const classified = await classifyContent(content, themes);
+		const classified = await classifyContent(content, themes, modelId);
 		results.push(classified);
 	}
 

@@ -25,6 +25,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { ContentSource } from "@/types/project";
 
 interface SourceListProps {
@@ -167,12 +168,20 @@ function SourceItem({
 						{source.status === "failed" && source.error && (
 							<p className="mt-1 text-destructive text-xs">{source.error}</p>
 						)}
-						{source.status === "completed" && source.metadata?.content && (
-							<p className="mt-1 text-muted-foreground text-xs">
-								{(source.metadata.content as string).length.toLocaleString()}{" "}
-								characters extracted
-							</p>
-						)}
+						{source.status === "completed" &&
+							source.metadata?.extraction?.stats?.totalItems !== undefined && (
+								<p className="mt-1 text-muted-foreground text-xs">
+									{source.metadata.extraction.stats.totalItems} items extracted
+								</p>
+							)}
+						{source.status === "completed" &&
+							source.metadata?.extraction?.stats?.totalItems === undefined &&
+							source.metadata?.content && (
+								<p className="mt-1 text-muted-foreground text-xs">
+									{(source.metadata.content as string).length.toLocaleString()}{" "}
+									characters extracted
+								</p>
+							)}
 					</div>
 				</div>
 
@@ -230,6 +239,7 @@ export function SourceList({
 	onStatusChange,
 }: SourceListProps) {
 	const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+	const { settings } = useSettings();
 
 	if (sources.length === 0) {
 		return null;
@@ -250,6 +260,8 @@ export function SourceList({
 					projectId,
 					pageId: source.reference,
 					type: source.type,
+					modelConfig: settings.modelConfig,
+					parameters: settings.extractionParameters,
 				}),
 			});
 

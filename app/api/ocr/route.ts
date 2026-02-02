@@ -25,7 +25,11 @@ import {
 	uploadToR2,
 	validateR2Config,
 } from "@/lib/storage";
-import type { OcrJobResults, StartOcrJobInput } from "@/types";
+import type {
+	ExtractionParameters,
+	OcrJobResults,
+	StartOcrJobInput,
+} from "@/types";
 
 /**
  * Size threshold for using page-image pipeline (50MB).
@@ -40,6 +44,8 @@ interface ExtendedOcrJobInput extends StartOcrJobInput {
 	autoExtract?: boolean;
 	/** Force use of page-image pipeline even for small files */
 	forcePagePipeline?: boolean;
+	parameters?: ExtractionParameters;
+	modelConfig?: Record<string, string>;
 }
 
 /**
@@ -70,8 +76,15 @@ export async function POST(request: NextRequest) {
 
 		// Parse request
 		const body = (await request.json()) as ExtendedOcrJobInput;
-		const { sourceKey, projectId, assetId, autoExtract, forcePagePipeline } =
-			body;
+		const {
+			sourceKey,
+			projectId,
+			assetId,
+			autoExtract,
+			forcePagePipeline,
+			parameters,
+			modelConfig,
+		} = body;
 
 		if (!sourceKey) {
 			return NextResponse.json(
@@ -97,7 +110,13 @@ export async function POST(request: NextRequest) {
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ assetId, sourceKey, autoExtract }),
+					body: JSON.stringify({
+						assetId,
+						sourceKey,
+						autoExtract,
+						parameters,
+						modelConfig,
+					}),
 				}
 			);
 
@@ -122,6 +141,20 @@ export async function POST(request: NextRequest) {
 		// Create the job (1 item = entire PDF)
 		const job = await createJob("ocr", sourceKey, projectId, 1);
 
+		if (assetId) {
+			await updateAssetStatus(
+				assetId,
+				"ocr_processing",
+				undefined,
+				job.id,
+				undefined,
+				undefined,
+				undefined,
+				parameters,
+				modelConfig
+			);
+		}
+
 		// Start processing in the background
 		processOcrJob(
 			job.id,
@@ -129,7 +162,9 @@ export async function POST(request: NextRequest) {
 			urlResult.readUrl,
 			assetId,
 			autoExtract,
-			request.url
+			request.url,
+			parameters,
+			modelConfig
 		).catch((error) => {
 			console.error(`OCR job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
@@ -224,7 +259,9 @@ async function processOcrJob(
 	pdfUrl: string,
 	assetId?: string,
 	autoExtract?: boolean,
-	requestUrl?: string
+	requestUrl?: string,
+	parameters?: ExtractionParameters,
+	modelConfig?: Record<string, string>
 ) {
 	console.log(`[OCR] Starting direct PDF OCR for job ${jobId}`);
 
@@ -278,7 +315,10 @@ async function processOcrJob(
 				fullResults.totalWordCount,
 				jobId,
 				autoExtract,
-				requestUrl
+				requestUrl,
+				undefined,
+				parameters,
+				modelConfig
 			);
 		}
 
@@ -297,7 +337,9 @@ async function processOcrJob(
 				undefined,
 				undefined,
 				undefined,
-				error instanceof Error ? error.message : "OCR failed"
+				error instanceof Error ? error.message : "OCR failed",
+				undefined,
+				undefined
 			);
 		}
 
@@ -310,12 +352,18 @@ async function processOcrJob(
  */
 async function updateAssetStatus(
 	assetId: string,
-	status: "ocr_completed" | "ocr_failed" | "extraction_queued",
+	status:
+		| "ocr_processing"
+		| "ocr_completed"
+		| "ocr_failed"
+		| "extraction_queued",
 	wordCount?: number,
 	ocrJobId?: string,
 	autoExtract?: boolean,
 	requestUrl?: string,
-	errorMessage?: string
+	errorMessage?: string,
+	parameters?: ExtractionParameters,
+	modelConfig?: Record<string, string>
 ) {
 	try {
 		const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -333,7 +381,7 @@ async function updateAssetStatus(
 			status,
 			ocrWordCount: wordCount,
 			ocrJobId,
-			lastError: errorMessage,
+			lastError: errorMessage ?? "",
 		});
 
 		console.log(`[OCR] Updated asset ${assetId} status to ${status}`);
@@ -355,6 +403,8 @@ async function updateAssetStatus(
 				body: JSON.stringify({
 					ocrJobId,
 					assetId,
+					parameters,
+					modelConfig,
 				}),
 			}).catch((err) => {
 				console.error(

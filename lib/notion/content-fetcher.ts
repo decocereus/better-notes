@@ -37,10 +37,14 @@ export interface UserContentFetchResult {
 	pageId: string;
 	/** Page title */
 	title: string;
+	/** Page URL */
+	url: string;
 	/** Raw text content */
 	text: string;
 	/** Image URLs found in the page */
 	images: string[];
+	/** Block count */
+	blockCount: number;
 	/** Word count */
 	wordCount: number;
 }
@@ -65,8 +69,10 @@ export async function fetchUserContent(
 	return {
 		pageId: page.id,
 		title: page.title,
+		url: page.url,
 		text: page.content,
 		images,
+		blockCount: page.blocks.length,
 		wordCount,
 	};
 }
@@ -100,21 +106,17 @@ function extractImageUrls(blocks: NotionBlock[]): string[] {
  * @param parameters - Extraction parameters
  * @returns Array of extracted content items
  */
-export async function extractUserContentFromPage(
-	pageIdOrUrl: string,
-	apiKey: string,
-	parameters: ExtractionParameters
+export async function extractUserContentFromFetched(
+	userContent: UserContentFetchResult,
+	parameters: ExtractionParameters,
+	modelId?: string
 ): Promise<ExtractedContent[]> {
-	// Fetch the page content
-	const userContent = await fetchUserContent(pageIdOrUrl, apiKey);
-
-	// Skip very short pages
 	if (userContent.wordCount < 50) {
 		return [];
 	}
 
 	// Use LLM to extract structured content
-	const model = getModel("EXTRACTION");
+	const model = getModel("EXTRACTION", modelId);
 	const prompt = createExtractionPrompt(
 		userContent.text,
 		parameters,
@@ -163,6 +165,26 @@ export async function extractUserContentFromPage(
 }
 
 /**
+ * Extracts structured content from a user's Notion page.
+ * Uses LLM to parse the content into ExtractedContent format.
+ *
+ * @param pageIdOrUrl - The Notion page ID or URL
+ * @param apiKey - The Notion API key
+ * @param parameters - Extraction parameters
+ * @returns Array of extracted content items
+ */
+export async function extractUserContentFromPage(
+	pageIdOrUrl: string,
+	apiKey: string,
+	parameters: ExtractionParameters,
+	modelId?: string
+): Promise<ExtractedContent[]> {
+	// Fetch the page content
+	const userContent = await fetchUserContent(pageIdOrUrl, apiKey);
+	return extractUserContentFromFetched(userContent, parameters, modelId);
+}
+
+/**
  * Extracts user content from multiple Notion pages.
  *
  * @param pageRefs - Array of Notion page IDs or URLs
@@ -175,7 +197,8 @@ export async function extractUserContentBatch(
 	pageRefs: string[],
 	apiKey: string,
 	parameters: ExtractionParameters,
-	onProgress?: (processed: number, total: number) => void
+	onProgress?: (processed: number, total: number) => void,
+	modelId?: string
 ): Promise<ExtractedContent[]> {
 	const allContent: ExtractedContent[] = [];
 
@@ -186,7 +209,8 @@ export async function extractUserContentBatch(
 			const content = await extractUserContentFromPage(
 				pageRef,
 				apiKey,
-				parameters
+				parameters,
+				modelId
 			);
 			allContent.push(...content);
 		} catch (error) {

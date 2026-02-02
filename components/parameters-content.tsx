@@ -7,6 +7,7 @@ import {
 	Loader2,
 	RotateCcw,
 	Save,
+	Sparkles,
 	X,
 } from "lucide-react";
 import Link from "next/link";
@@ -58,7 +59,10 @@ export function ParametersContent() {
 	const [isCheckingConnection, setIsCheckingConnection] = useState(true);
 	const [isConnected, setIsConnected] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
+	const [isExtractingParams, setIsExtractingParams] = useState(false);
 	const [newOverusedItem, setNewOverusedItem] = useState("");
+	const [extractError, setExtractError] = useState<string | null>(null);
+	const [extractSuccess, setExtractSuccess] = useState(false);
 
 	// Local state for parameters (to avoid constant updates)
 	const [localParams, setLocalParams] = useState<ExtractionParameters>(
@@ -93,12 +97,16 @@ export function ParametersContent() {
 		updateSettings({
 			strategyPageId: pageId,
 		});
+		setExtractError(null);
+		setExtractSuccess(false);
 	};
 
 	const handleClearStrategyPage = () => {
 		updateSettings({
 			strategyPageId: undefined,
 		});
+		setExtractError(null);
+		setExtractSuccess(false);
 	};
 
 	const handleSaveParameters = () => {
@@ -107,6 +115,46 @@ export function ParametersContent() {
 			extractionParameters: localParams,
 		});
 		setTimeout(() => setIsSaving(false), 500);
+	};
+
+	const handleExtractParameters = async () => {
+		if (!settings.strategyPageId) {
+			return;
+		}
+
+		setIsExtractingParams(true);
+		setExtractError(null);
+		setExtractSuccess(false);
+
+		try {
+			const response = await fetch("/api/parameters/extract", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					pageId: settings.strategyPageId,
+					modelConfig: settings.modelConfig,
+				}),
+			});
+
+			const data = (await response.json()) as {
+				parameters?: ExtractionParameters;
+				error?: string;
+			};
+
+			if (!(response.ok && data.parameters)) {
+				throw new Error(data.error || "Failed to extract parameters");
+			}
+
+			setLocalParams(data.parameters);
+			updateSettings({ extractionParameters: data.parameters });
+			setExtractSuccess(true);
+		} catch (error) {
+			setExtractError(
+				error instanceof Error ? error.message : "Failed to extract parameters"
+			);
+		} finally {
+			setIsExtractingParams(false);
+		}
 	};
 
 	const handleResetToDefaults = () => {
@@ -145,6 +193,9 @@ export function ParametersContent() {
 
 	// Use API check for connection status
 	const notionReady = isConnected;
+	const hasSavedParameters =
+		settings.extractionParameters &&
+		Object.keys(settings.extractionParameters).length > 0;
 
 	if (!isHydrated || isCheckingConnection) {
 		return (
@@ -198,6 +249,34 @@ export function ParametersContent() {
 						onSelect={handleSelectStrategyPage}
 						strategyPageId={settings.strategyPageId}
 					/>
+					{notionReady && settings.strategyPageId && (
+						<div className="mt-4 space-y-2">
+							<div className="flex flex-wrap items-center gap-3">
+								<Button
+									disabled={isExtractingParams}
+									onClick={handleExtractParameters}
+								>
+									{isExtractingParams ? (
+										<Loader2 className="size-4 animate-spin" />
+									) : (
+										<Sparkles className="size-4" />
+									)}
+									{hasSavedParameters
+										? "Re-extract Parameters"
+										: "Extract Parameters"}
+								</Button>
+								{extractSuccess && (
+									<div className="flex items-center gap-2 text-green-600 text-sm">
+										<CheckCircle className="size-4" />
+										<span>Parameters updated from strategy document.</span>
+									</div>
+								)}
+							</div>
+							{extractError && (
+								<p className="text-destructive text-sm">{extractError}</p>
+							)}
+						</div>
+					)}
 				</div>
 			</Card>
 

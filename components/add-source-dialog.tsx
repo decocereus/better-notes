@@ -18,6 +18,7 @@ import { UploadZone } from "@/components/upload-zone";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { UploadResponse } from "@/types/upload";
 
 interface AddSourceDialogProps {
@@ -33,6 +34,7 @@ interface SelectedPage {
 }
 
 export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
+	const { settings } = useSettings();
 	const addSource = useMutation(api.projects.addSource);
 
 	const [open, setOpen] = useState(false);
@@ -88,6 +90,8 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 					projectId,
 					pageId,
 					type: "notion",
+					parameters: settings.extractionParameters,
+					modelConfig: settings.modelConfig,
 				}),
 			});
 
@@ -218,9 +222,11 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 						<UploadZone
 							autoProcess
 							disabled={isLoading}
+							modelConfig={settings.modelConfig}
 							multiple
 							onUploadComplete={handleUploadComplete}
 							onUploadError={handleUploadError}
+							parameters={settings.extractionParameters}
 							projectId={projectId}
 						/>
 					)}

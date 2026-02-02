@@ -6,6 +6,7 @@ import { OcrViewer } from "@/components/ocr-viewer";
 import { ProcessingStatus } from "@/components/processing-status";
 import { Button } from "@/components/ui/button";
 import { UploadZone } from "@/components/upload-zone";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { OcrJobResults } from "@/types";
 import type { UploadResponse } from "@/types/upload";
 
@@ -32,6 +33,7 @@ export function PdfUploadOcr({
 	onOcrComplete,
 	className,
 }: PdfUploadOcrProps) {
+	const { settings } = useSettings();
 	const [stage, setStage] = useState<Stage>("upload");
 	const [uploadedPdf, setUploadedPdf] = useState<UploadedPdf | null>(null);
 	const [jobId, setJobId] = useState<string | null>(null);
@@ -69,6 +71,8 @@ export function PdfUploadOcr({
 				body: JSON.stringify({
 					sourceKey: uploadedPdf.key,
 					projectId,
+					parameters: settings.extractionParameters,
+					modelConfig: settings.modelConfig,
 				}),
 			});
 
@@ -83,7 +87,12 @@ export function PdfUploadOcr({
 			setError(err instanceof Error ? err.message : "Failed to start OCR");
 			setStage("confirm");
 		}
-	}, [uploadedPdf, projectId]);
+	}, [
+		uploadedPdf,
+		projectId,
+		settings.extractionParameters,
+		settings.modelConfig,
+	]);
 
 	const handleOcrComplete = useCallback(
 		async (completedJobId: string) => {

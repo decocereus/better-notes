@@ -14,6 +14,7 @@ import {
 	generateSuggestions,
 	getReadinessAssessment,
 } from "@/lib/comparison";
+import { getModelForTask } from "@/lib/llm/provider";
 import {
 	completeJob,
 	createJob,
@@ -36,6 +37,8 @@ import type { MainTheme, MiniTheme } from "@/types/theme";
 interface CompareRequestBody extends StartComparisonInput {
 	/** Classification job ID to get content from */
 	classificationJobId: string;
+	/** Optional model configuration per task */
+	modelConfig?: Record<string, string>;
 }
 
 /**
@@ -106,6 +109,7 @@ function validateRequestBody(body: CompareRequestBody): {
 	miniThemeId: string;
 	userContentIds?: string[] | "all";
 	topperContentIds?: string[] | "all";
+	modelConfig?: Record<string, string>;
 } {
 	const {
 		classificationJobId,
@@ -113,6 +117,7 @@ function validateRequestBody(body: CompareRequestBody): {
 		miniThemeId,
 		userContentIds,
 		topperContentIds,
+		modelConfig,
 	} = body;
 
 	if (!classificationJobId) {
@@ -124,6 +129,7 @@ function validateRequestBody(body: CompareRequestBody): {
 			classificationJobId: "",
 			mainThemeId: "",
 			miniThemeId: "",
+			modelConfig,
 		};
 	}
 
@@ -136,6 +142,7 @@ function validateRequestBody(body: CompareRequestBody): {
 			classificationJobId,
 			mainThemeId: "",
 			miniThemeId: "",
+			modelConfig,
 		};
 	}
 
@@ -148,6 +155,7 @@ function validateRequestBody(body: CompareRequestBody): {
 			classificationJobId,
 			mainThemeId,
 			miniThemeId: "",
+			modelConfig,
 		};
 	}
 
@@ -158,6 +166,7 @@ function validateRequestBody(body: CompareRequestBody): {
 		miniThemeId,
 		userContentIds,
 		topperContentIds,
+		modelConfig,
 	};
 }
 
@@ -259,6 +268,7 @@ export async function POST(request: NextRequest) {
 			miniThemeId,
 			userContentIds,
 			topperContentIds,
+			modelConfig,
 		} = validation;
 
 		// Verify classification job is completed
@@ -345,13 +355,16 @@ export async function POST(request: NextRequest) {
 		);
 
 		// Start processing in background
+		const modelId = getModelForTask("comparison", modelConfig);
+
 		processComparisonJob(
 			job.id,
 			classificationJobId,
 			userContent,
 			topperContent,
 			mainTheme,
-			miniTheme
+			miniTheme,
+			modelId
 		).catch((error) => {
 			console.error(`Comparison job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
@@ -460,7 +473,8 @@ async function processComparisonJob(
 	userContent: ExtractedContent[],
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
-	miniTheme: MiniTheme
+	miniTheme: MiniTheme,
+	modelId?: string
 ) {
 	// Step 1: Analyze gaps
 	await updateJobProgress(jobId, 0, 3);
@@ -468,7 +482,9 @@ async function processComparisonJob(
 		userContent,
 		topperContent,
 		mainTheme,
-		miniTheme
+		miniTheme,
+		undefined,
+		modelId
 	);
 
 	// Step 2: Generate suggestions
@@ -479,7 +495,8 @@ async function processComparisonJob(
 			gapResult.gaps,
 			topperContent,
 			mainTheme,
-			miniTheme
+			miniTheme,
+			modelId
 		);
 	}
 
@@ -501,7 +518,8 @@ async function processComparisonJob(
 		mainTheme,
 		miniTheme,
 		comparisonResult.gaps.length,
-		suggestions.length
+		suggestions.length,
+		modelId
 	);
 
 	// Build full results

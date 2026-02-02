@@ -20,6 +20,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { Asset, AssetStats } from "@/types/asset";
 import { AssetCard } from "./asset-card";
 import { AssetDetailDialog } from "./asset-detail-dialog";
@@ -31,6 +32,7 @@ interface AssetsData {
 }
 
 export function AssetsContent() {
+	const { settings } = useSettings();
 	const [data, setData] = useState<AssetsData | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -110,6 +112,11 @@ export function AssetsContent() {
 		try {
 			const response = await fetch(`/api/assets/${assetId}/process`, {
 				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					parameters: settings.extractionParameters,
+					modelConfig: settings.modelConfig,
+				}),
 			});
 
 			if (!response.ok) {

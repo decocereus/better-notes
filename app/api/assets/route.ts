@@ -10,6 +10,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { createLogger } from "@/lib/utils/logger";
+import type { ExtractionParameters } from "@/types/extraction";
 
 const log = createLogger("api/assets");
 
@@ -20,6 +21,8 @@ interface CreateAssetBody {
 	mimeType: string;
 	projectId?: string;
 	autoProcess?: boolean;
+	parameters?: ExtractionParameters;
+	modelConfig?: Record<string, string>;
 }
 
 /**
@@ -46,6 +49,10 @@ export async function GET(request: NextRequest) {
 		// Valid status values
 		const validStatuses = [
 			"pending",
+			"conversion_queued",
+			"conversion_processing",
+			"conversion_completed",
+			"conversion_failed",
 			"ocr_queued",
 			"ocr_processing",
 			"ocr_completed",
@@ -109,7 +116,16 @@ export async function POST(request: NextRequest) {
 		const convex = new ConvexHttpClient(convexUrl);
 
 		const body = (await request.json()) as CreateAssetBody;
-		const { key, filename, size, mimeType, projectId, autoProcess } = body;
+		const {
+			key,
+			filename,
+			size,
+			mimeType,
+			projectId,
+			autoProcess,
+			parameters,
+			modelConfig,
+		} = body;
 
 		if (!(key && filename && size && mimeType)) {
 			return NextResponse.json(
@@ -140,6 +156,7 @@ export async function POST(request: NextRequest) {
 			fetch(processUrl.toString(), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ parameters, modelConfig }),
 			}).catch((err) => {
 				log.error(
 					`Failed to trigger auto-processing for asset ${assetId}:`,

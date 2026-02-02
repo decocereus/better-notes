@@ -83,7 +83,8 @@ export function noteNeedsCondensation(note: GeneratedNote): {
 export async function condenseSection(
 	section: NoteSection,
 	sectionType: "yourNotes" | "topperInsights",
-	theme: { mainTheme: MainTheme; miniTheme: MiniTheme }
+	theme: { mainTheme: MainTheme; miniTheme: MiniTheme },
+	modelId?: string
 ): Promise<NoteSection> {
 	const maxWords =
 		sectionType === "yourNotes"
@@ -95,7 +96,7 @@ export async function condenseSection(
 		return section;
 	}
 
-	const model = getModel("EXTRACTION");
+	const model = getModel("GENERATION", modelId);
 	const prompt = createCondensationPrompt(
 		sectionType,
 		section.content,
@@ -131,7 +132,8 @@ export async function condenseSection(
  */
 export async function enforceNoteConciseness(
 	note: GeneratedNote,
-	theme: { mainTheme: MainTheme; miniTheme: MiniTheme }
+	theme: { mainTheme: MainTheme; miniTheme: MiniTheme },
+	modelId?: string
 ): Promise<GeneratedNote> {
 	const status = noteNeedsCondensation(note);
 
@@ -146,7 +148,8 @@ export async function enforceNoteConciseness(
 		const condensedYourNotes = await condenseSection(
 			note.yourNotes,
 			"yourNotes",
-			theme
+			theme,
+			modelId
 		);
 		updatedNote = {
 			...updatedNote,
@@ -159,7 +162,8 @@ export async function enforceNoteConciseness(
 		const condensedTopperInsights = await condenseSection(
 			note.topperInsights,
 			"topperInsights",
-			theme
+			theme,
+			modelId
 		);
 		updatedNote = {
 			...updatedNote,

@@ -63,9 +63,10 @@ export async function generateNotesForTheme(
 	miniTheme: MiniTheme,
 	userContent: ExtractedContent[],
 	topperContent: ExtractedContent[],
-	config: GenerationConfig
+	config: GenerationConfig,
+	modelId?: string
 ): Promise<GeneratedNote> {
-	const model = getModel("EXTRACTION"); // OpenRouter default model for generation
+	const model = getModel("GENERATION", modelId);
 	const prompt = createNoteGenerationPrompt(
 		userContent,
 		topperContent,

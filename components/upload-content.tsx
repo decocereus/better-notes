@@ -15,6 +15,7 @@ import { UploadZone } from "@/components/upload-zone";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { MIME_TO_SOURCE_TYPE } from "@/lib/constants/upload";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { Project } from "@/types/project";
 import type { UploadResponse } from "@/types/upload";
 
@@ -24,6 +25,7 @@ interface UploadedFile {
 }
 
 export function UploadContent() {
+	const { settings } = useSettings();
 	const projects = useQuery(api.projects.list) as Project[] | undefined;
 	const addSource = useMutation(api.projects.addSource);
 	const [selectedProjectId, setSelectedProjectId] = useState<string>("");
@@ -115,9 +117,11 @@ export function UploadContent() {
 			<Card className="p-6">
 				<UploadZone
 					autoProcess
+					modelConfig={settings.modelConfig}
 					multiple
 					onUploadComplete={handleUploadComplete}
 					onUploadError={handleUploadError}
+					parameters={settings.extractionParameters}
 					projectId={selectedProjectId || undefined}
 				/>
 			</Card>

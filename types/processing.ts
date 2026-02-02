@@ -3,6 +3,8 @@
  * Used to track long-running background tasks.
  */
 
+import type { ExtractionParameters } from "./extraction";
+
 /**
  * Types of processing jobs.
  */
@@ -110,6 +112,10 @@ export interface StartOcrJobInput {
 	/** Optional: specific page range to process */
 	startPage?: number;
 	endPage?: number;
+	/** Optional: extraction parameters for auto-extract */
+	parameters?: ExtractionParameters;
+	/** Optional: model overrides for auto-extract */
+	modelConfig?: Record<string, string>;
 }
 
 /**
@@ -118,6 +124,7 @@ export interface StartOcrJobInput {
 export interface StartExtractionJobInput {
 	ocrJobId: string;
 	parametersId?: string; // ID of saved parameters, or use defaults
+	modelConfig?: Record<string, string>;
 }
 
 /**

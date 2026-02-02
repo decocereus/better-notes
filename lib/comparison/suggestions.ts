@@ -41,7 +41,8 @@ export async function generateSuggestions(
 	gaps: ContentGap[],
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
-	miniTheme: MiniTheme
+	miniTheme: MiniTheme,
+	modelId?: string
 ): Promise<ComparisonSuggestion[]> {
 	if (gaps.length === 0) {
 		return [];
@@ -52,7 +53,8 @@ export async function generateSuggestions(
 		gaps,
 		topperContent,
 		mainTheme,
-		miniTheme
+		miniTheme,
+		modelId
 	);
 
 	if (llmSuggestions.length > 0) {
@@ -70,9 +72,10 @@ export async function generateSuggestionsWithLLM(
 	gaps: ContentGap[],
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
-	miniTheme: MiniTheme
+	miniTheme: MiniTheme,
+	modelId?: string
 ): Promise<ComparisonSuggestion[]> {
-	const model = getModel("COMPARISON");
+	const model = getModel("COMPARISON", modelId);
 
 	// Prepare gap data for prompt
 	const gapData = gaps.slice(0, 10).map((g) => ({

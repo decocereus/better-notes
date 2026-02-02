@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { filterBySource } from "@/lib/comparison/gap-analyzer";
 import { enforceNoteConciseness } from "@/lib/generation/conciseness";
 import { generateNotesForTheme } from "@/lib/generation/note-generator";
+import { getModelForTask } from "@/lib/llm/provider";
 import type { ExtractedContent } from "@/types/extraction";
 import type { GeneratedNote, GenerationConfig } from "@/types/generation";
 import { DEFAULT_GENERATION_CONFIG } from "@/types/generation";
@@ -20,6 +21,8 @@ interface GenerateRequest {
 	config?: Partial<GenerationConfig>;
 	/** Whether to enforce conciseness limits */
 	enforceConciseness?: boolean;
+	/** Optional model configuration per task */
+	modelConfig?: Record<string, string>;
 }
 
 interface GenerateResponse {
@@ -54,6 +57,7 @@ export async function POST(
 			projectId,
 			config: customConfig,
 			enforceConciseness = true,
+			modelConfig,
 		} = body;
 
 		// Validate inputs
@@ -97,17 +101,23 @@ export async function POST(
 		}
 
 		// Generate notes
+		const modelId = getModelForTask("generation", modelConfig);
 		let note = await generateNotesForTheme(
 			mainTheme,
 			miniTheme,
 			userContent,
 			topperContent,
-			config
+			config,
+			modelId
 		);
 
 		// Enforce conciseness if enabled
 		if (enforceConciseness) {
-			note = await enforceNoteConciseness(note, { mainTheme, miniTheme });
+			note = await enforceNoteConciseness(
+				note,
+				{ mainTheme, miniTheme },
+				modelId
+			);
 		}
 
 		if (projectId) {

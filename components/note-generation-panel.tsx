@@ -93,6 +93,7 @@ export function NoteGenerationPanel({
 					content,
 					projectId,
 					enforceConciseness: true,
+					modelConfig: settings.modelConfig,
 				}),
 			});
 
@@ -117,7 +118,15 @@ export function NoteGenerationPanel({
 		} finally {
 			setIsGenerating(false);
 		}
-	}, [content, mainTheme, miniTheme, onNoteGenerated, persistNote, projectId]);
+	}, [
+		content,
+		mainTheme,
+		miniTheme,
+		onNoteGenerated,
+		persistNote,
+		projectId,
+		settings.modelConfig,
+	]);
 
 	const handleSyncComplete = useCallback(
 		async (result: SyncResult) => {

@@ -100,7 +100,8 @@ export async function analyzeGaps(
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
 	miniTheme: MiniTheme,
-	config: ScoringConfig = DEFAULT_SCORING_CONFIG
+	config: ScoringConfig = DEFAULT_SCORING_CONFIG,
+	modelId?: string
 ): Promise<ThemeComparisonResult> {
 	// Calculate coverage statistics
 	const coverage = calculateCoverageStats(userContent, topperContent);
@@ -115,7 +116,8 @@ export async function analyzeGaps(
 		userContent,
 		topperContent,
 		mainTheme,
-		miniTheme
+		miniTheme,
+		modelId
 	);
 
 	// Convert LLM gaps to typed gaps with IDs
@@ -302,14 +304,15 @@ async function identifyGapsWithLLM(
 	userContent: ExtractedContent[],
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
-	miniTheme: MiniTheme
+	miniTheme: MiniTheme,
+	modelId?: string
 ): Promise<ContentGap[]> {
 	// If no topper content, no gaps to identify via LLM
 	if (topperContent.length === 0) {
 		return [];
 	}
 
-	const model = getModel("COMPARISON");
+	const model = getModel("COMPARISON", modelId);
 	const prompt = createGapAnalysisPrompt(userContent, topperContent, {
 		mainTheme,
 		miniTheme,
@@ -503,7 +506,8 @@ export async function getReadinessAssessment(
 	mainTheme: MainTheme,
 	miniTheme: MiniTheme,
 	gapCount: number,
-	suggestionCount: number
+	suggestionCount: number,
+	modelId?: string
 ): Promise<{
 	overallScore: number;
 	scoreBreakdown: {
@@ -516,7 +520,7 @@ export async function getReadinessAssessment(
 	criticalImprovements: string[];
 	recommendedFocus: string;
 }> {
-	const model = getModel("COMPARISON");
+	const model = getModel("COMPARISON", modelId);
 	const prompt = createReadinessAssessmentPrompt(
 		userContent,
 		topperContent,

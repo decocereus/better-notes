@@ -21,6 +21,8 @@ export const MODELS = {
 	/** Kimi K2.5 - Used for all tasks */
 	COMPARISON: "moonshotai/kimi-k2.5",
 	/** Kimi K2.5 - Used for all tasks */
+	GENERATION: "moonshotai/kimi-k2.5",
+	/** Kimi K2.5 - Used for all tasks */
 	SIMPLE: "moonshotai/kimi-k2.5",
 } as const;
 
@@ -47,9 +49,10 @@ export function getAIClient() {
 /**
  * Gets a model instance for a specific task type.
  */
-export function getModel(type: ModelType) {
+export function getModel(type: ModelType, overrideModelId?: string) {
 	const client = getAIClient();
-	return client(MODELS[type]);
+	const modelId = overrideModelId ?? MODELS[type];
+	return client(modelId);
 }
 
 /**
@@ -57,7 +60,11 @@ export function getModel(type: ModelType) {
  * Use this when processing chunks sequentially to ensure each chunk gets
  * full model attention without shortcut-taking from previous similar requests.
  */
-export function getFreshModel(type: ModelType, chunkId?: string) {
+export function getFreshModel(
+	type: ModelType,
+	chunkId?: string,
+	overrideModelId?: string
+) {
 	// Create a wrapper that adds unique headers for each chunk
 	// This prevents any potential caching or context reuse
 	const freshClient = createOpenAI({
@@ -71,7 +78,8 @@ export function getFreshModel(type: ModelType, chunkId?: string) {
 		},
 	});
 
-	return freshClient(MODELS[type]);
+	const modelId = overrideModelId ?? MODELS[type];
+	return freshClient(modelId);
 }
 
 /**

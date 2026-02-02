@@ -8,24 +8,33 @@ import {
 	ChevronDown,
 	ChevronRight,
 	FileText,
+	Link as LinkIcon,
 	Loader2,
+	type LucideIcon,
 	Play,
 	RefreshCw,
 	Sparkles,
 	Tag,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { ClassificationReview } from "@/components/classification-review";
 import { ComparisonResults } from "@/components/comparison-results";
 import { NoteGenerationPanel } from "@/components/note-generation-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { aggregateContentByTheme } from "@/lib/classification/aggregator";
+import { useSettings } from "@/lib/hooks/use-settings";
 import type { Asset } from "@/types/asset";
 import type { ThemeComparisonResult } from "@/types/comparison";
-import type { ExtractedContent } from "@/types/extraction";
+import type {
+	ExtractedContent,
+	ExtractionParameters,
+} from "@/types/extraction";
 import type { GeneratedNote } from "@/types/generation";
+import type { ContentSource } from "@/types/project";
 import type { MainTheme, MiniTheme } from "@/types/theme";
 
 // ============================================================================
@@ -36,6 +45,7 @@ interface ProjectWorkflowProps {
 	projectId: string;
 	themePageId: string;
 	assets: Asset[];
+	sources: ContentSource[];
 	themes: MainTheme[];
 }
 
@@ -45,6 +55,7 @@ interface ClassificationState {
 	progress: number;
 	totalItems: number;
 	processedItems: number;
+	error?: string;
 	results: ClassificationResults | null;
 }
 
@@ -52,9 +63,16 @@ interface ClassificationResults {
 	themes: MainTheme[];
 	classifiedContent: ExtractedContent[];
 	stats: {
-		totalClassified: number;
-		multiThemeCount: number;
-		themesWithContent: number;
+		classification?: {
+			totalClassified: number;
+			unclassified: number;
+			multiThemeCount: number;
+			averageMappings: number;
+		};
+		aggregation?: {
+			themesWithContent: number;
+			totalContent: number;
+		};
 	};
 }
 
@@ -63,7 +81,187 @@ interface ComparisonState {
 		jobId: string | null;
 		status: "idle" | "processing" | "completed" | "failed";
 		result: ThemeComparisonResult | null;
+		error?: string;
 	};
+}
+
+interface StatusItem {
+	id: string;
+	label: string;
+	icon: LucideIcon;
+	error?: string;
+}
+
+interface RetryFailedItemsInput {
+	failedSources: ContentSource[];
+	failedAssets: Asset[];
+	projectId: string;
+	modelConfig?: Record<string, string>;
+	parameters?: ExtractionParameters;
+	setIsRetryingFailed: (value: boolean) => void;
+	setRetryError: (value: string | null) => void;
+}
+
+interface StartComparisonInput {
+	classificationJobId: string | null;
+	mainTheme: MainTheme;
+	miniTheme: MiniTheme;
+	modelConfig?: Record<string, string>;
+	setComparisons: (
+		value: ComparisonState | ((prev: ComparisonState) => ComparisonState)
+	) => void;
+}
+
+async function startComparisonForTheme({
+	classificationJobId,
+	mainTheme,
+	miniTheme,
+	modelConfig,
+	setComparisons,
+}: StartComparisonInput) {
+	if (!classificationJobId) {
+		return;
+	}
+
+	const themeKey = `${mainTheme.id}-${miniTheme.id}`;
+
+	setComparisons((prev) => ({
+		...prev,
+		[themeKey]: {
+			jobId: null,
+			status: "processing",
+			result: null,
+			error: undefined,
+		},
+	}));
+
+	try {
+		const response = await fetch("/api/compare", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				classificationJobId,
+				mainThemeId: mainTheme.id,
+				miniThemeId: miniTheme.id,
+				userContentIds: "all",
+				topperContentIds: "all",
+				modelConfig,
+			}),
+		});
+
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.error || "Failed to start comparison");
+		}
+
+		const data = await response.json();
+
+		// Poll for comparison result
+		const pollComparison = async () => {
+			const statusRes = await fetch(`/api/compare?jobId=${data.jobId}`);
+			const statusData = await statusRes.json();
+
+			if (statusData.job.status === "completed" && statusData.results) {
+				setComparisons((prev) => ({
+					...prev,
+					[themeKey]: {
+						jobId: data.jobId,
+						status: "completed",
+						result: statusData.results.result,
+						error: undefined,
+					},
+				}));
+			} else if (statusData.job.status === "failed") {
+				setComparisons((prev) => ({
+					...prev,
+					[themeKey]: {
+						jobId: data.jobId,
+						status: "failed",
+						result: null,
+						error: statusData.job.errors?.[0]?.message ?? "Comparison failed",
+					},
+				}));
+			} else {
+				setTimeout(pollComparison, 2000);
+			}
+		};
+
+		pollComparison();
+	} catch {
+		setComparisons((prev) => ({
+			...prev,
+			[themeKey]: {
+				jobId: null,
+				status: "failed",
+				result: null,
+				error: "Failed to start comparison",
+			},
+		}));
+	}
+}
+
+async function retryFailedItems({
+	failedSources,
+	failedAssets,
+	projectId,
+	modelConfig,
+	parameters,
+	setIsRetryingFailed,
+	setRetryError,
+}: RetryFailedItemsInput) {
+	if (failedSources.length === 0 && failedAssets.length === 0) {
+		return;
+	}
+
+	setIsRetryingFailed(true);
+	setRetryError(null);
+
+	try {
+		const tasks: Promise<Response>[] = [];
+
+		for (const source of failedSources) {
+			tasks.push(
+				fetch("/api/sources/process", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						projectId,
+						pageId: source.reference,
+						type: source.type,
+						modelConfig,
+						parameters,
+					}),
+				})
+			);
+		}
+
+		for (const asset of failedAssets) {
+			tasks.push(
+				fetch(`/api/assets/${asset.id}/process`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						parameters,
+						modelConfig,
+					}),
+				})
+			);
+		}
+
+		const results = await Promise.allSettled(tasks);
+		const failedCount = results.filter((result) => {
+			if (result.status === "rejected") {
+				return true;
+			}
+			return !result.value.ok;
+		}).length;
+
+		if (failedCount > 0) {
+			setRetryError(`Failed to retry ${failedCount} item(s).`);
+		}
+	} finally {
+		setIsRetryingFailed(false);
+	}
 }
 
 // ============================================================================
@@ -71,7 +269,14 @@ interface ComparisonState {
 // ============================================================================
 
 export function ProjectWorkflow(props: ProjectWorkflowProps) {
-	const { projectId: projectIdValue, themePageId, assets, themes } = props;
+	const {
+		projectId: projectIdValue,
+		themePageId,
+		assets,
+		sources,
+		themes,
+	} = props;
+	const { settings } = useSettings();
 	// Get assets by processing status
 	const completedAssets = assets.filter(
 		(a) => a.processingStatus === "extraction_completed"
@@ -96,8 +301,74 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 			a.processingStatus === "conversion_failed"
 	);
 
-	const hasExtractedContent = completedAssets.length > 0;
-	const isExtracting = processingAssets.length > 0 || pendingAssets.length > 0;
+	const notionSources = sources.filter((source) => source.type === "notion");
+	const processingSources = notionSources.filter(
+		(source) => source.status === "processing"
+	);
+	const pendingSources = notionSources.filter(
+		(source) => source.status === "pending"
+	);
+	const failedSources = notionSources.filter(
+		(source) => source.status === "failed"
+	);
+
+	const completedNotionSources = sources.filter(
+		(source) =>
+			source.type === "notion" &&
+			source.status === "completed" &&
+			(source.metadata?.extraction?.items?.length ?? 0) > 0
+	);
+
+	const processingItems: StatusItem[] = [
+		...processingAssets.map((asset) => ({
+			id: asset.id,
+			label: asset.filename,
+			icon: FileText,
+		})),
+		...processingSources.map((source) => ({
+			id: source.id,
+			label: source.name,
+			icon: LinkIcon,
+		})),
+	];
+
+	const pendingItems: StatusItem[] = [
+		...pendingAssets.map((asset) => ({
+			id: asset.id,
+			label: asset.filename,
+			icon: FileText,
+		})),
+		...pendingSources.map((source) => ({
+			id: source.id,
+			label: source.name,
+			icon: LinkIcon,
+		})),
+	];
+
+	const failedItems: StatusItem[] = [
+		...failedAssets.map((asset) => ({
+			id: asset.id,
+			label: asset.filename,
+			icon: FileText,
+			error: asset.lastError,
+		})),
+		...failedSources.map((source) => ({
+			id: source.id,
+			label: source.name,
+			icon: LinkIcon,
+			error:
+				source.error ??
+				(typeof source.metadata?.error === "string"
+					? source.metadata.error
+					: undefined),
+		})),
+	];
+
+	const hasExtractedContent =
+		completedAssets.length > 0 || completedNotionSources.length > 0;
+	const isExtracting = processingItems.length > 0 || pendingItems.length > 0;
+	const hasInFlightSources =
+		processingItems.length > 0 || pendingItems.length > 0;
 
 	// Classification state
 	const [classification, setClassification] = useState<ClassificationState>({
@@ -106,8 +377,11 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		progress: 0,
 		totalItems: 0,
 		processedItems: 0,
+		error: undefined,
 		results: null,
 	});
+	const [retryError, setRetryError] = useState<string | null>(null);
+	const [isRetryingFailed, setIsRetryingFailed] = useState(false);
 
 	// Comparison state per theme
 	const [comparisons, setComparisons] = useState<ComparisonState>({});
@@ -136,6 +410,10 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 					processedItems: data.job.processedItems,
 					totalItems: data.job.totalItems,
 					results: data.results || null,
+					error:
+						data.job.status === "failed"
+							? (data.job.errors?.[0]?.message ?? "Classification failed")
+							: undefined,
 				}));
 
 				// Continue polling while job is pending or processing
@@ -169,7 +447,7 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 	]);
 
 	const startClassification = async () => {
-		if (completedAssets.length === 0) {
+		if (!hasExtractedContent || hasInFlightSources) {
 			return;
 		}
 
@@ -180,6 +458,7 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 			progress: 0,
 			totalItems: 0,
 			processedItems: 0,
+			error: undefined,
 			results: null,
 		});
 
@@ -190,6 +469,7 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 				body: JSON.stringify({
 					projectId: projectIdValue,
 					themePageId,
+					modelConfig: settings.modelConfig,
 				}),
 			});
 
@@ -205,77 +485,30 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 			setClassification((prev) => ({
 				...prev,
 				status: "failed",
+				error:
+					_error instanceof Error
+						? _error.message
+						: "Failed to start classification",
 			}));
 		}
 	};
 
-	const startComparison = async (
-		mainTheme: MainTheme,
-		miniTheme: MiniTheme
-	) => {
-		if (!classification.results) {
-			return;
-		}
-
-		const themeKey = `${mainTheme.id}-${miniTheme.id}`;
-
-		setComparisons((prev) => ({
-			...prev,
-			[themeKey]: { jobId: null, status: "processing", result: null },
-		}));
-
-		try {
-			const response = await fetch("/api/compare", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					classificationJobId: classification.jobId,
-					mainThemeId: mainTheme.id,
-					miniThemeId: miniTheme.id,
-					userContentIds: "all",
-					topperContentIds: "all",
-				}),
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || "Failed to start comparison");
+	const startComparison = useCallback(
+		(mainTheme: MainTheme, miniTheme: MiniTheme) => {
+			if (!classification.results) {
+				return;
 			}
 
-			const data = await response.json();
-
-			// Poll for comparison result
-			const pollComparison = async () => {
-				const statusRes = await fetch(`/api/compare?jobId=${data.jobId}`);
-				const statusData = await statusRes.json();
-
-				if (statusData.job.status === "completed" && statusData.results) {
-					setComparisons((prev) => ({
-						...prev,
-						[themeKey]: {
-							jobId: data.jobId,
-							status: "completed",
-							result: statusData.results.result,
-						},
-					}));
-				} else if (statusData.job.status === "failed") {
-					setComparisons((prev) => ({
-						...prev,
-						[themeKey]: { jobId: data.jobId, status: "failed", result: null },
-					}));
-				} else {
-					setTimeout(pollComparison, 2000);
-				}
-			};
-
-			pollComparison();
-		} catch {
-			setComparisons((prev) => ({
-				...prev,
-				[themeKey]: { jobId: null, status: "failed", result: null },
-			}));
-		}
-	};
+			startComparisonForTheme({
+				classificationJobId: classification.jobId,
+				mainTheme,
+				miniTheme,
+				modelConfig: settings.modelConfig,
+				setComparisons,
+			});
+		},
+		[classification.jobId, classification.results, settings.modelConfig]
+	);
 
 	const getContentForTheme = (
 		mainThemeId: string,
@@ -292,110 +525,328 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		);
 	};
 
+	const handleRetryFailedItems = useCallback(() => {
+		retryFailedItems({
+			failedSources,
+			failedAssets,
+			projectId: projectIdValue,
+			modelConfig: settings.modelConfig,
+			parameters: settings.extractionParameters,
+			setIsRetryingFailed,
+			setRetryError,
+		});
+	}, [
+		failedSources,
+		failedAssets,
+		projectIdValue,
+		settings.modelConfig,
+		settings.extractionParameters,
+	]);
+
 	// ============================================================================
 	// RENDER
 	// ============================================================================
 
+	const reviewStats = useMemo(() => {
+		const stats = classification.results?.stats?.classification;
+		if (!stats) {
+			return null;
+		}
+		return {
+			totalClassified: stats.totalClassified,
+			unclassified: stats.unclassified,
+			multiThemeCount: stats.multiThemeCount,
+			averageMappings: stats.averageMappings,
+		};
+	}, [classification.results]);
+
+	const aggregatedContent = useMemo(() => {
+		if (!classification.results) {
+			return [];
+		}
+		return aggregateContentByTheme(
+			classification.results.classifiedContent,
+			themes
+		);
+	}, [classification.results, themes]);
+
 	return (
 		<div className="space-y-6">
-			{/* Extraction Status */}
-			{isExtracting && (
-				<Card className="p-6">
-					<div className="space-y-4">
-						<div className="flex items-center gap-4">
-							<div className="rounded-full bg-primary/10 p-3">
-								<Loader2 className="size-6 animate-spin text-primary" />
-							</div>
-							<div className="flex-1">
-								<h3 className="font-medium text-lg">
-									Processing Content Sources
-								</h3>
-								<p className="text-muted-foreground text-sm">
-									{processingAssets.length > 0
-										? `${processingAssets.length} source${processingAssets.length > 1 ? "s" : ""} currently processing...`
-										: `${pendingAssets.length} source${pendingAssets.length > 1 ? "s" : ""} waiting to be processed...`}
-								</p>
-							</div>
-						</div>
-						<div className="space-y-2">
-							{processingAssets.map((asset) => (
-								<div
-									className="flex items-center gap-2 text-muted-foreground text-sm"
-									key={asset.id}
-								>
-									<FileText className="size-4" />
-									<span className="flex-1 truncate">{asset.filename}</span>
-									<Badge className="animate-pulse" variant="secondary">
-										Processing
-									</Badge>
-								</div>
-							))}
-							{pendingAssets.map((asset) => (
-								<div
-									className="flex items-center gap-2 text-muted-foreground text-sm"
-									key={asset.id}
-								>
-									<FileText className="size-4" />
-									<span className="flex-1 truncate">{asset.filename}</span>
-									<Badge variant="outline">Queued</Badge>
-								</div>
-							))}
-						</div>
-					</div>
-				</Card>
-			)}
+			<ExtractionStatusCard
+				isExtracting={isExtracting}
+				pendingItems={pendingItems}
+				processingItems={processingItems}
+			/>
 
-			{/* Failed Assets */}
-			{failedAssets.length > 0 && (
-				<Card className="border-destructive/50 bg-destructive/5 p-6">
-					<div className="space-y-3">
-						<div className="flex items-center gap-4">
-							<AlertCircle className="size-6 text-destructive" />
-							<div>
-								<h3 className="font-medium text-destructive text-lg">
-									Processing Failed
-								</h3>
-								<p className="text-muted-foreground text-sm">
-									{failedAssets.length} source
-									{failedAssets.length > 1 ? "s" : ""} failed to process
-								</p>
-							</div>
-						</div>
-						<div className="space-y-2">
-							{failedAssets.map((asset) => (
-								<div
-									className="flex items-center gap-2 text-muted-foreground text-sm"
-									key={asset.id}
-								>
-									<FileText className="size-4" />
-									<span className="flex-1 truncate">{asset.filename}</span>
-									<Badge variant="destructive">Failed</Badge>
-								</div>
-							))}
-						</div>
-					</div>
-				</Card>
-			)}
+			<FailedItemsCard
+				failedItems={failedItems}
+				isRetryingFailed={isRetryingFailed}
+				onRetry={handleRetryFailedItems}
+				retryError={retryError}
+			/>
 
 			{/* Step 1: Classification */}
 			<ClassificationSection
+				blockReason={
+					hasInFlightSources
+						? "Finish processing all sources before running classification."
+						: undefined
+				}
 				classification={classification}
 				hasExtractedContent={hasExtractedContent}
+				isBlocked={hasInFlightSources}
 				onStart={startClassification}
 			/>
 
-			{/* Step 2: Theme Selection & Comparison */}
-			{classification.status === "completed" && classification.results && (
-				<ComparisonSection
-					comparisons={comparisons}
-					content={classification.results.classifiedContent}
-					getContentForTheme={getContentForTheme}
-					onCompare={startComparison}
-					projectId={projectIdValue}
-					themes={themes}
-				/>
-			)}
+			<ClassificationReviewCard
+				aggregatedContent={aggregatedContent}
+				classification={classification}
+				reviewStats={reviewStats}
+			/>
+
+			<ComparisonSectionContainer
+				classification={classification}
+				comparisons={comparisons}
+				getContentForTheme={getContentForTheme}
+				onCompare={startComparison}
+				projectId={projectIdValue}
+				themes={themes}
+			/>
 		</div>
+	);
+}
+
+// ============================================================================
+// STATUS & REVIEW CARDS
+// ============================================================================
+
+interface ExtractionStatusCardProps {
+	isExtracting: boolean;
+	processingItems: StatusItem[];
+	pendingItems: StatusItem[];
+}
+
+function ExtractionStatusCard({
+	isExtracting,
+	processingItems,
+	pendingItems,
+}: ExtractionStatusCardProps) {
+	if (!isExtracting) {
+		return null;
+	}
+
+	return (
+		<Card className="p-6">
+			<div className="space-y-4">
+				<div className="flex items-center gap-4">
+					<div className="rounded-full bg-primary/10 p-3">
+						<Loader2 className="size-6 animate-spin text-primary" />
+					</div>
+					<div className="flex-1">
+						<h3 className="font-medium text-lg">Processing Content Sources</h3>
+						<p className="text-muted-foreground text-sm">
+							{processingItems.length > 0
+								? `${processingItems.length} source${processingItems.length > 1 ? "s" : ""} currently processing...`
+								: `${pendingItems.length} source${pendingItems.length > 1 ? "s" : ""} waiting to be processed...`}
+						</p>
+					</div>
+				</div>
+				<div className="space-y-2">
+					{processingItems.map((item) => {
+						const ItemIcon = item.icon;
+						return (
+							<div
+								className="flex items-center gap-2 text-muted-foreground text-sm"
+								key={item.id}
+							>
+								<ItemIcon className="size-4" />
+								<span className="flex-1 truncate">{item.label}</span>
+								<Badge className="animate-pulse" variant="secondary">
+									Processing
+								</Badge>
+							</div>
+						);
+					})}
+					{pendingItems.map((item) => {
+						const ItemIcon = item.icon;
+						return (
+							<div
+								className="flex items-center gap-2 text-muted-foreground text-sm"
+								key={item.id}
+							>
+								<ItemIcon className="size-4" />
+								<span className="flex-1 truncate">{item.label}</span>
+								<Badge variant="outline">Queued</Badge>
+							</div>
+						);
+					})}
+				</div>
+			</div>
+		</Card>
+	);
+}
+
+interface FailedItemsCardProps {
+	failedItems: StatusItem[];
+	retryError: string | null;
+	isRetryingFailed: boolean;
+	onRetry: () => void;
+}
+
+function FailedItemsCard({
+	failedItems,
+	retryError,
+	isRetryingFailed,
+	onRetry,
+}: FailedItemsCardProps) {
+	if (failedItems.length === 0) {
+		return null;
+	}
+
+	return (
+		<Card className="border-destructive/50 bg-destructive/5 p-6">
+			<div className="space-y-3">
+				<div className="flex items-center gap-4">
+					<AlertCircle className="size-6 text-destructive" />
+					<div>
+						<h3 className="font-medium text-destructive text-lg">
+							Processing Failed
+						</h3>
+						<p className="text-muted-foreground text-sm">
+							{failedItems.length} source{failedItems.length > 1 ? "s" : ""}{" "}
+							failed to process
+						</p>
+					</div>
+				</div>
+				<div className="space-y-2">
+					{failedItems.map((item) => {
+						const ItemIcon = item.icon;
+						return (
+							<div
+								className="flex items-center gap-2 text-muted-foreground text-sm"
+								key={item.id}
+							>
+								<ItemIcon className="size-4" />
+								<span className="flex-1 truncate">{item.label}</span>
+								<Badge variant="destructive">Failed</Badge>
+							</div>
+						);
+					})}
+					{failedItems.some((item) => item.error) && (
+						<div className="text-destructive text-xs">
+							Check the source list for error details and retry options.
+						</div>
+					)}
+					{retryError && (
+						<div className="text-destructive text-xs">{retryError}</div>
+					)}
+				</div>
+				<Button
+					disabled={isRetryingFailed}
+					onClick={onRetry}
+					size="sm"
+					variant="outline"
+				>
+					{isRetryingFailed ? (
+						<Loader2 className="mr-2 size-4 animate-spin" />
+					) : (
+						<RefreshCw className="mr-2 size-4" />
+					)}
+					Retry failed items
+				</Button>
+			</div>
+		</Card>
+	);
+}
+
+type ReviewStats = NonNullable<
+	ClassificationResults["stats"]["classification"]
+>;
+
+interface ClassificationReviewCardProps {
+	classification: ClassificationState;
+	reviewStats: ReviewStats | null;
+	aggregatedContent: ReturnType<typeof aggregateContentByTheme>;
+}
+
+function ClassificationReviewCard({
+	classification,
+	reviewStats,
+	aggregatedContent,
+}: ClassificationReviewCardProps) {
+	const [showReview, setShowReview] = useState(false);
+
+	if (
+		classification.status !== "completed" ||
+		!classification.results ||
+		!reviewStats
+	) {
+		return null;
+	}
+
+	return (
+		<Card className="p-6">
+			<div className="flex items-center justify-between gap-4">
+				<div>
+					<h3 className="font-medium text-lg">Classification Review</h3>
+					<p className="text-muted-foreground text-sm">
+						Review how your content mapped to themes before comparing.
+					</p>
+				</div>
+				<Button
+					onClick={() => setShowReview((prev) => !prev)}
+					variant="outline"
+				>
+					{showReview ? "Hide Review" : "Review Classifications"}
+				</Button>
+			</div>
+			{showReview && (
+				<div className="mt-6">
+					<ClassificationReview
+						aggregatedContent={aggregatedContent}
+						content={classification.results.classifiedContent}
+						stats={reviewStats}
+						themes={classification.results.themes}
+					/>
+				</div>
+			)}
+		</Card>
+	);
+}
+
+interface ComparisonSectionContainerProps {
+	classification: ClassificationState;
+	themes: MainTheme[];
+	comparisons: ComparisonState;
+	projectId: string;
+	onCompare: (mainTheme: MainTheme, miniTheme: MiniTheme) => void;
+	getContentForTheme: (
+		mainThemeId: string,
+		miniThemeId: string
+	) => ExtractedContent[];
+}
+
+function ComparisonSectionContainer({
+	classification,
+	themes,
+	comparisons,
+	projectId,
+	onCompare,
+	getContentForTheme,
+}: ComparisonSectionContainerProps) {
+	if (classification.status !== "completed" || !classification.results) {
+		return null;
+	}
+
+	return (
+		<ComparisonSection
+			comparisons={comparisons}
+			content={classification.results.classifiedContent}
+			getContentForTheme={getContentForTheme}
+			onCompare={onCompare}
+			projectId={projectId}
+			themes={themes}
+		/>
 	);
 }
 
@@ -406,12 +857,16 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 interface ClassificationSectionProps {
 	classification: ClassificationState;
 	hasExtractedContent: boolean;
+	isBlocked?: boolean;
+	blockReason?: string;
 	onStart: () => void;
 }
 
 function ClassificationSection({
 	classification,
 	hasExtractedContent,
+	isBlocked,
+	blockReason,
 	onStart,
 }: ClassificationSectionProps) {
 	if (!hasExtractedContent) {
@@ -426,8 +881,29 @@ function ClassificationSection({
 							Step 1: Theme Classification
 						</h3>
 						<p className="mt-1 text-muted-foreground text-sm">
-							Process your uploaded essays first. Once extraction is complete,
+							Process your content sources first. Once extraction is complete,
 							you can classify the content into themes.
+						</p>
+					</div>
+				</div>
+			</Card>
+		);
+	}
+
+	if (classification.status === "idle" && isBlocked) {
+		return (
+			<Card className="border-primary/20 bg-primary/5 p-6">
+				<div className="flex items-start gap-4">
+					<div className="rounded-full bg-primary/10 p-3">
+						<Loader2 className="size-6 animate-spin text-primary" />
+					</div>
+					<div className="flex-1">
+						<h3 className="font-medium text-lg">
+							Step 1: Theme Classification
+						</h3>
+						<p className="mt-1 text-muted-foreground text-sm">
+							{blockReason ??
+								"Classification will be available after processing finishes."}
 						</p>
 					</div>
 				</div>
@@ -498,6 +974,11 @@ function ClassificationSection({
 							<p className="mt-1 text-muted-foreground text-sm">
 								Something went wrong. You can try again.
 							</p>
+							{classification.error && (
+								<p className="mt-2 text-destructive text-xs">
+									{classification.error}
+								</p>
+							)}
 						</div>
 					</div>
 					<Button onClick={onStart} variant="outline">
@@ -510,7 +991,8 @@ function ClassificationSection({
 	}
 
 	// Completed
-	const stats = classification.results?.stats;
+	const stats = classification.results?.stats?.classification;
+	const aggregation = classification.results?.stats?.aggregation;
 	return (
 		<Card className="border-green-500/30 bg-green-500/5 p-6">
 			<div className="flex items-start justify-between gap-4">
@@ -529,9 +1011,11 @@ function ClassificationSection({
 								<Badge variant="secondary">
 									{stats.totalClassified} items classified
 								</Badge>
-								<Badge variant="outline">
-									{stats.themesWithContent} themes covered
-								</Badge>
+								{aggregation && (
+									<Badge variant="outline">
+										{aggregation.themesWithContent} themes covered
+									</Badge>
+								)}
 								{stats.multiThemeCount > 0 && (
 									<Badge
 										className="bg-blue-500/10 text-blue-700"
@@ -636,6 +1120,10 @@ function ComparisonSection({
 										mainTheme.id,
 										miniTheme.id
 									).length;
+									const compareLabel =
+										comparison?.status === "failed" ? "Retry" : "Compare";
+									const CompareIcon =
+										comparison?.status === "failed" ? RefreshCw : BarChart3;
 
 									return (
 										<div
@@ -650,6 +1138,12 @@ function ComparisonSection({
 														{miniTheme.questions.length} questions •{" "}
 														{contentCount} content items
 													</p>
+													{comparison?.status === "failed" &&
+														comparison.error && (
+															<p className="mt-1 text-destructive text-xs">
+																{comparison.error}
+															</p>
+														)}
 												</div>
 											</div>
 
@@ -699,8 +1193,8 @@ function ComparisonSection({
 															size="sm"
 															variant="outline"
 														>
-															<BarChart3 className="mr-2 size-4" />
-															Compare
+															<CompareIcon className="mr-2 size-4" />
+															{compareLabel}
 														</Button>
 													)}
 											</div>

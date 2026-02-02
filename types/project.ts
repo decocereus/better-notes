@@ -3,6 +3,8 @@
  * A project is a session for working on themes with content sources.
  */
 
+import type { ExtractedContent, ExtractionParameters } from "./extraction";
+
 export type ContentSourceType = "notion" | "pdf" | "image" | "text";
 export type ContentSourceStatus =
 	| "pending"
@@ -30,9 +32,21 @@ export interface ContentSource {
 		pageId?: string;
 		blockCount?: number;
 		url?: string;
+		wordCount?: number;
+		imageCount?: number;
 		processedAt?: string;
 		error?: string;
 		failedAt?: string;
+		extraction?: {
+			items?: ExtractedContent[];
+			stats?: {
+				totalItems?: number;
+				byType?: Record<string, number>;
+				byQuality?: Record<string, number>;
+			};
+			parameters?: ExtractionParameters;
+			extractedAt?: string;
+		};
 	};
 }
 

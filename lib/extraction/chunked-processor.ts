@@ -148,6 +148,7 @@ function runChunkAttempt({
 	totalEssays,
 	onProgress,
 	log,
+	modelId,
 }: {
 	chunk: EssayChunkItem[];
 	chunkIndex: number;
@@ -159,9 +160,10 @@ function runChunkAttempt({
 	totalEssays: number;
 	onProgress?: ChunkProgressCallback;
 	log: (message: string, ...args: unknown[]) => void;
+	modelId?: string;
 }): Promise<EssayExtractionResult[]> {
 	const chunkModelFactory = () =>
-		getFreshModel("EXTRACTION", `${chunkIndex}-${retryCount}`);
+		getFreshModel("EXTRACTION", `${chunkIndex}-${retryCount}`, modelId);
 
 	log(`Creating fresh model instance for chunk ${chunkIndex + 1}`);
 
@@ -190,6 +192,7 @@ async function processChunkWithRetries({
 	stats,
 	onProgress,
 	log,
+	modelId,
 }: {
 	chunk: EssayChunkItem[];
 	chunkIndex: number;
@@ -202,6 +205,7 @@ async function processChunkWithRetries({
 	stats: ProcessingStats;
 	onProgress?: ChunkProgressCallback;
 	log: (message: string, ...args: unknown[]) => void;
+	modelId?: string;
 }): Promise<ChunkOutcome> {
 	const globalIndices = chunk.map((_, i) => startIndex + i);
 	let lastError: Error | null = null;
@@ -227,6 +231,7 @@ async function processChunkWithRetries({
 				totalEssays,
 				onProgress,
 				log,
+				modelId,
 			});
 
 			return { success: true, results: chunkResults, globalIndices };
@@ -325,7 +330,8 @@ export async function processEssaysInChunks(
 		totalChunks: number,
 		currentEssay: number,
 		totalEssays: number
-	) => void
+	) => void,
+	modelId?: string
 ): Promise<{ results: EssayExtractionResult[]; stats: ProcessingStats }> {
 	const fullConfig = { ...DEFAULT_CONFIG, ...config };
 	const log = (message: string, ...args: unknown[]) => {
@@ -346,7 +352,8 @@ export async function processEssaysInChunks(
 		ocrResults,
 		(processed, total) => {
 			log(`Boundary detection: ${processed}/${total} batches`);
-		}
+		},
+		modelId
 	);
 
 	log(`Detected ${boundaries.length} essays`);
@@ -400,6 +407,7 @@ export async function processEssaysInChunks(
 			stats,
 			onProgress,
 			log,
+			modelId,
 		});
 
 		if (outcome.success) {

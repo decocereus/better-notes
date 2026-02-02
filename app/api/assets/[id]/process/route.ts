@@ -9,11 +9,104 @@ import { type NextRequest, NextResponse } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { createLogger } from "@/lib/utils/logger";
+import type { Asset, AssetProcessingStatus } from "@/types/asset";
+import type { ExtractionParameters } from "@/types/extraction";
 
 const log = createLogger("api/assets/[id]/process");
 
 interface RouteContext {
 	params: Promise<{ id: string }>;
+}
+
+const ASSET_STATUS_VALUES: AssetProcessingStatus[] = [
+	"pending",
+	"conversion_queued",
+	"conversion_processing",
+	"conversion_completed",
+	"conversion_failed",
+	"ocr_queued",
+	"ocr_processing",
+	"ocr_completed",
+	"ocr_failed",
+	"extraction_queued",
+	"extraction_processing",
+	"extraction_completed",
+	"extraction_failed",
+];
+
+function isAssetProcessingStatus(
+	value: string
+): value is AssetProcessingStatus {
+	return ASSET_STATUS_VALUES.includes(value as AssetProcessingStatus);
+}
+
+function getConvexClient(): ConvexHttpClient {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+	}
+	return new ConvexHttpClient(convexUrl);
+}
+
+function getAssetProcessingError(asset: Asset): NextResponse | null {
+	if (asset.sourceType !== "pdf") {
+		return NextResponse.json(
+			{ error: "Only PDF assets can be processed" },
+			{ status: 400 }
+		);
+	}
+
+	const isProcessing =
+		asset.processingStatus === "ocr_processing" ||
+		asset.processingStatus === "extraction_processing";
+	const hasStaleError = Boolean(asset.lastError);
+	if (isProcessing && !hasStaleError) {
+		return NextResponse.json(
+			{ error: "Asset is already being processed" },
+			{ status: 400 }
+		);
+	}
+
+	return null;
+}
+
+async function applyOcrResponseStatus({
+	convex,
+	assetId,
+	ocrData,
+}: {
+	convex: ConvexHttpClient;
+	assetId: string;
+	ocrData: { jobId?: string; status?: string };
+}): Promise<{ jobId: string | null; status: AssetProcessingStatus | null }> {
+	const jobId =
+		typeof ocrData.jobId === "string" && ocrData.jobId.length > 0
+			? ocrData.jobId
+			: null;
+	let nextStatus: AssetProcessingStatus | null = null;
+	if (
+		typeof ocrData.status === "string" &&
+		isAssetProcessingStatus(ocrData.status)
+	) {
+		nextStatus = ocrData.status;
+	}
+
+	if (jobId) {
+		await convex.mutation(api.assets.updateStatus, {
+			id: assetId as Id<"assets">,
+			status: "ocr_processing",
+			ocrJobId: jobId,
+			lastError: "",
+		});
+	} else if (nextStatus) {
+		await convex.mutation(api.assets.updateStatus, {
+			id: assetId as Id<"assets">,
+			status: nextStatus,
+			lastError: "",
+		});
+	}
+
+	return { jobId, status: nextStatus };
 }
 
 /**
@@ -23,16 +116,13 @@ interface RouteContext {
 export async function POST(request: NextRequest, context: RouteContext) {
 	try {
 		const { id: assetId } = await context.params;
+		const body = (await request.json().catch(() => ({}))) as {
+			parameters?: ExtractionParameters;
+			modelConfig?: Record<string, string>;
+		};
+		const { parameters, modelConfig } = body;
 
-		const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-		if (!convexUrl) {
-			return NextResponse.json(
-				{ error: "Server configuration error" },
-				{ status: 500 }
-			);
-		}
-
-		const convex = new ConvexHttpClient(convexUrl);
+		const convex = getConvexClient();
 
 		// Get the asset
 		const asset = await convex.query(api.assets.get, {
@@ -43,24 +133,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 			return NextResponse.json({ error: "Asset not found" }, { status: 404 });
 		}
 
-		// Only process PDFs
-		if (asset.sourceType !== "pdf") {
-			return NextResponse.json(
-				{ error: "Only PDF assets can be processed" },
-				{ status: 400 }
-			);
-		}
-
-		// Check if already processing
-		const isProcessing =
-			asset.processingStatus === "ocr_processing" ||
-			asset.processingStatus === "extraction_processing";
-		const hasStaleError = Boolean(asset.lastError);
-		if (isProcessing && !hasStaleError) {
-			return NextResponse.json(
-				{ error: "Asset is already being processed" },
-				{ status: 400 }
-			);
+		const assetError = getAssetProcessingError(asset);
+		if (assetError) {
+			return assetError;
 		}
 
 		// Update status to OCR queued
@@ -82,6 +157,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 				projectId: asset.projectId,
 				assetId,
 				autoExtract: true, // Automatically trigger extraction after OCR
+				parameters,
+				modelConfig,
 			}),
 		});
 
@@ -100,21 +177,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 		const ocrData = await ocrResponse.json();
 
-		// Update asset with OCR job ID
-		await convex.mutation(api.assets.updateStatus, {
-			id: assetId as Id<"assets">,
-			status: "ocr_processing",
-			ocrJobId: ocrData.jobId,
-			lastError: "",
+		const jobLabel =
+			typeof ocrData.jobId === "string" && ocrData.jobId.length > 0
+				? `OCR job ${ocrData.jobId}`
+				: `OCR pipeline (${ocrData.status ?? "started"})`;
+		const { jobId, status } = await applyOcrResponseStatus({
+			convex,
+			assetId,
+			ocrData,
 		});
 
-		log.info(`OCR job ${ocrData.jobId} started for asset ${assetId}`);
+		log.info(`${jobLabel} started for asset ${assetId}`);
 
 		return NextResponse.json({
 			success: true,
 			assetId,
-			ocrJobId: ocrData.jobId,
-			status: "ocr_processing",
+			ocrJobId: jobId,
+			status: status ?? "ocr_processing",
 		});
 	} catch (error) {
 		log.error("Failed to start processing:", error);

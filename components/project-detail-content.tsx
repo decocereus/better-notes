@@ -445,6 +445,7 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 				<WorkflowSection
 					assets={assets}
 					projectId={projectId}
+					sources={project.sources as ContentSource[]}
 					themePage={themePage}
 				/>
 			)}
@@ -647,6 +648,7 @@ async function deleteFileFromR2Storage(key: string): Promise<void> {
 // Workflow section component to avoid nested ternaries
 interface WorkflowSectionProps {
 	assets: Asset[] | undefined;
+	sources: ContentSource[];
 	projectId: string;
 	themePage: ThemePage;
 }
@@ -654,6 +656,7 @@ interface WorkflowSectionProps {
 function WorkflowSection({
 	assets,
 	projectId,
+	sources,
 	themePage,
 }: WorkflowSectionProps) {
 	// Loading state
@@ -672,7 +675,7 @@ function WorkflowSection({
 	}
 
 	// Empty state
-	if (assets.length === 0) {
+	if (assets.length === 0 && sources.length === 0) {
 		return (
 			<Card className="p-6">
 				<h3 className="mb-4 font-medium text-lg">Analysis Workflow</h3>
@@ -696,6 +699,7 @@ function WorkflowSection({
 		<ProjectWorkflow
 			assets={assets}
 			projectId={projectId}
+			sources={sources}
 			themePageId={themePage.id}
 			themes={themePage.themes as MainTheme[]}
 		/>

@@ -66,8 +66,12 @@ async function runFullPipeline(
 	assetId: string,
 	sourceKey: string,
 	autoExtract: boolean,
-	requestUrl: string
+	requestUrl: string,
+	parameters?: StartOcrPipelineInput["parameters"],
+	modelConfig?: StartOcrPipelineInput["modelConfig"]
 ) {
+	let stage: "conversion" | "ocr" | "extraction" = "conversion";
+
 	try {
 		// Phase 1: Convert PDF to images
 		console.log(`[OCR] Starting PDF conversion for asset ${assetId}`);
@@ -94,6 +98,7 @@ async function runFullPipeline(
 		await updateAssetStatus(assetId, "conversion_completed");
 
 		// Phase 2: Run OCR on page images
+		stage = "ocr";
 		console.log(`[OCR] Starting OCR for asset ${assetId}`);
 		await updateAssetStatus(assetId, "ocr_processing");
 
@@ -125,13 +130,18 @@ async function runFullPipeline(
 
 		// Phase 3: Auto-extract if enabled
 		if (autoExtract) {
+			stage = "extraction";
 			const baseUrl = new URL(requestUrl).origin;
 			await updateAssetStatus(assetId, "extraction_queued");
 
 			fetch(`${baseUrl}/api/extract`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ assetId }),
+				body: JSON.stringify({
+					assetId,
+					parameters,
+					modelConfig,
+				}),
 			}).catch((err) => {
 				console.error(
 					`[OCR] Failed to trigger auto-extraction for asset ${assetId}:`,
@@ -145,7 +155,16 @@ async function runFullPipeline(
 		console.error(`[OCR] Pipeline failed for asset ${assetId}:`, error);
 		const errorMessage =
 			error instanceof Error ? error.message : "Unknown error";
-		await updateAssetStatus(assetId, "ocr_failed", {
+		let failureStatus:
+			| "conversion_failed"
+			| "ocr_failed"
+			| "extraction_failed" = "ocr_failed";
+		if (stage === "conversion") {
+			failureStatus = "conversion_failed";
+		} else if (stage === "extraction") {
+			failureStatus = "extraction_failed";
+		}
+		await updateAssetStatus(assetId, failureStatus, {
 			lastError: errorMessage,
 		});
 	}
@@ -190,7 +209,13 @@ export async function POST(request: NextRequest) {
 
 		// Parse request
 		const body = (await request.json()) as StartOcrPipelineInput;
-		const { assetId, sourceKey, autoExtract = false } = body;
+		const {
+			assetId,
+			sourceKey,
+			autoExtract = false,
+			parameters,
+			modelConfig,
+		} = body;
 
 		if (!assetId) {
 			return NextResponse.json(
@@ -210,11 +235,16 @@ export async function POST(request: NextRequest) {
 		await updateAssetStatus(assetId, "conversion_queued");
 
 		// Start pipeline in background
-		runFullPipeline(assetId, sourceKey, autoExtract, request.url).catch(
-			(error) => {
-				console.error(`[OCR] Pipeline error for ${assetId}:`, error);
-			}
-		);
+		runFullPipeline(
+			assetId,
+			sourceKey,
+			autoExtract,
+			request.url,
+			parameters,
+			modelConfig
+		).catch((error) => {
+			console.error(`[OCR] Pipeline error for ${assetId}:`, error);
+		});
 
 		return NextResponse.json(
 			{

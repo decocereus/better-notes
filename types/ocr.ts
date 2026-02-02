@@ -2,6 +2,8 @@
  * Types for the OCR pipeline with PDF-to-Images conversion and multi-model fallback.
  */
 
+import type { ExtractionParameters } from "./extraction";
+
 /**
  * Result from OCR processing of a single page image.
  */
@@ -110,6 +112,10 @@ export interface StartOcrPipelineInput {
 	assetId: string;
 	sourceKey: string;
 	autoExtract?: boolean;
+	/** Optional: extraction parameters for auto-extract */
+	parameters?: ExtractionParameters;
+	/** Optional: model overrides for auto-extract */
+	modelConfig?: Record<string, string>;
 }
 
 /**

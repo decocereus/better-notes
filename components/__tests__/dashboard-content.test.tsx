@@ -52,7 +52,7 @@ describe("DashboardContent", () => {
 		expect(spinner).toBeInTheDocument();
 	});
 
-	it("renders welcome section", () => {
+	it("renders welcome section", async () => {
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
@@ -63,10 +63,12 @@ describe("DashboardContent", () => {
 		});
 
 		render(<DashboardContent />);
-		expect(screen.getByText("Welcome to BetterNotes")).toBeInTheDocument();
-		expect(
-			screen.getByText("Your intelligent UPSC essay preparation assistant")
-		).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Welcome to BetterNotes")).toBeInTheDocument();
+			expect(
+				screen.getByText("Your intelligent UPSC essay preparation assistant")
+			).toBeInTheDocument();
+		});
 	});
 
 	it("shows setup wizard when setup is incomplete", async () => {
@@ -160,7 +162,7 @@ describe("DashboardContent", () => {
 		);
 	});
 
-	it("renders overview section", () => {
+	it("renders overview section", async () => {
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
@@ -171,10 +173,12 @@ describe("DashboardContent", () => {
 		});
 
 		render(<DashboardContent />);
-		expect(screen.getByText("Overview")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Overview")).toBeInTheDocument();
+		});
 	});
 
-	it("renders quick actions section", () => {
+	it("renders quick actions section", async () => {
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
@@ -185,10 +189,12 @@ describe("DashboardContent", () => {
 		});
 
 		render(<DashboardContent />);
-		expect(screen.getByText("Quick Actions")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Quick Actions")).toBeInTheDocument();
+		});
 	});
 
-	it("renders recent projects section", () => {
+	it("renders recent projects section", async () => {
 		vi.mocked(useSettings).mockReturnValue({
 			settings: {},
 			isHydrated: true,
@@ -199,7 +205,9 @@ describe("DashboardContent", () => {
 		});
 
 		render(<DashboardContent />);
-		expect(screen.getByText("Recent Projects")).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByText("Recent Projects")).toBeInTheDocument();
+		});
 	});
 
 	it("has setup step links with correct hrefs", async () => {

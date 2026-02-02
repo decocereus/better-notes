@@ -23,6 +23,7 @@ import {
 	analyzeCrossThemeContent,
 	updateMultiUseFlags,
 } from "@/lib/classification/cross-theme";
+import { getModelForTask } from "@/lib/llm/provider";
 import {
 	completeJob,
 	createJob,
@@ -44,6 +45,8 @@ interface ClassifyRequestBody {
 	themePageId: string;
 	/** Project ID to aggregate all completed assets */
 	projectId?: string;
+	/** Optional model configuration per task */
+	modelConfig?: Record<string, string>;
 }
 
 /**
@@ -117,8 +120,9 @@ function validateRequestBody(body: ClassifyRequestBody): {
 	extractionJobId?: string;
 	themePageId: string;
 	projectId?: string;
+	modelConfig?: Record<string, string>;
 } {
-	const { extractionJobId, themePageId, projectId } = body;
+	const { extractionJobId, themePageId, projectId, modelConfig } = body;
 
 	if (!themePageId) {
 		return {
@@ -129,6 +133,7 @@ function validateRequestBody(body: ClassifyRequestBody): {
 			extractionJobId,
 			themePageId: "",
 			projectId,
+			modelConfig,
 		};
 	}
 
@@ -141,10 +146,11 @@ function validateRequestBody(body: ClassifyRequestBody): {
 			extractionJobId,
 			themePageId,
 			projectId,
+			modelConfig,
 		};
 	}
 
-	return { error: null, extractionJobId, themePageId, projectId };
+	return { error: null, extractionJobId, themePageId, projectId, modelConfig };
 }
 
 /**
@@ -218,6 +224,101 @@ async function loadThemesFromConvex(
 /**
  * Loads and aggregates extraction results for all completed assets in a project.
  */
+function getNotionExtractionItems(
+	metadata: unknown
+): ExtractedContent[] | null {
+	if (!metadata || typeof metadata !== "object") {
+		return null;
+	}
+
+	const extraction = (metadata as { extraction?: unknown }).extraction;
+	if (!extraction || typeof extraction !== "object") {
+		return null;
+	}
+
+	const items = (extraction as { items?: unknown }).items;
+	if (!Array.isArray(items)) {
+		return null;
+	}
+
+	return items as ExtractedContent[];
+}
+
+interface AssetExtractionAggregate {
+	content: ExtractedContent[];
+	extractionJobIds: string[];
+	missingJobIds: string[];
+}
+
+async function loadAssetExtractionResults(
+	assets: Array<{
+		processingStatus: string;
+		extractionJobId?: string;
+	}>
+): Promise<AssetExtractionAggregate> {
+	const completedAssets = assets.filter(
+		(asset) =>
+			asset.processingStatus === "extraction_completed" && asset.extractionJobId
+	);
+
+	const extractionJobIds = completedAssets
+		.map((asset) => asset.extractionJobId)
+		.filter((id): id is string => Boolean(id));
+
+	const missingJobIds: string[] = [];
+	const aggregatedContent: ExtractedContent[] = [];
+
+	for (const jobId of extractionJobIds) {
+		const result = await loadExtractionResults(jobId);
+		if (result.content) {
+			aggregatedContent.push(...result.content);
+		} else {
+			missingJobIds.push(jobId);
+		}
+	}
+
+	return {
+		content: aggregatedContent,
+		extractionJobIds,
+		missingJobIds,
+	};
+}
+
+interface NotionExtractionAggregate {
+	content: ExtractedContent[];
+	missingExtractionIds: string[];
+}
+
+function loadNotionExtractionResults(
+	sources: Array<{
+		id: string;
+		type: string;
+		status: string;
+		metadata?: unknown;
+	}>
+): NotionExtractionAggregate {
+	const aggregatedContent: ExtractedContent[] = [];
+	const missingExtractionIds: string[] = [];
+
+	for (const source of sources) {
+		if (source.type !== "notion" || source.status !== "completed") {
+			continue;
+		}
+
+		const extractedItems = getNotionExtractionItems(source.metadata);
+		if (!extractedItems) {
+			missingExtractionIds.push(source.id);
+			continue;
+		}
+
+		if (extractedItems.length > 0) {
+			aggregatedContent.push(...extractedItems);
+		}
+	}
+
+	return { content: aggregatedContent, missingExtractionIds };
+}
+
 async function loadProjectExtractionResults(projectId: string): Promise<{
 	content: ExtractedContent[] | null;
 	extractionJobIds: string[];
@@ -225,64 +326,81 @@ async function loadProjectExtractionResults(projectId: string): Promise<{
 }> {
 	try {
 		const convex = getConvexClient();
-		const assets = await convex.query(api.assets.listByProject, {
-			projectId: projectId as Id<"projects">,
-		});
+		const [assets, project] = await Promise.all([
+			convex.query(api.assets.listByProject, {
+				projectId: projectId as Id<"projects">,
+			}),
+			convex.query(api.projects.get, {
+				id: projectId as Id<"projects">,
+			}),
+		]);
 
-		const completedAssets = assets.filter(
-			(asset) =>
-				asset.processingStatus === "extraction_completed" &&
-				asset.extractionJobId
-		);
-
-		if (completedAssets.length === 0) {
+		if (!project) {
 			return {
 				content: null,
 				extractionJobIds: [],
 				error: NextResponse.json(
-					{ error: "No completed assets found for this project" },
-					{ status: 400 }
+					{ error: "Project not found" },
+					{ status: 404 }
 				),
 			};
 		}
 
-		const extractionJobIds = completedAssets
-			.map((asset) => asset.extractionJobId)
-			.filter((id): id is string => Boolean(id));
+		const assetAggregate = await loadAssetExtractionResults(assets);
+		const notionAggregate = loadNotionExtractionResults(project.sources);
+		const aggregatedContent = [
+			...assetAggregate.content,
+			...notionAggregate.content,
+		];
 
-		const results = await Promise.all(
-			extractionJobIds.map(async (jobId) => ({
-				jobId,
-				result: await loadExtractionResults(jobId),
-			}))
-		);
-
-		const missingJobIds: string[] = [];
-		const aggregatedContent: ExtractedContent[] = [];
-
-		for (const { jobId, result } of results) {
-			if (result.content) {
-				aggregatedContent.push(...result.content);
-			} else {
-				missingJobIds.push(jobId);
-			}
-		}
-
-		if (missingJobIds.length > 0) {
+		if (assetAggregate.missingJobIds.length > 0) {
 			return {
 				content: null,
-				extractionJobIds,
+				extractionJobIds: assetAggregate.extractionJobIds,
 				error: NextResponse.json(
 					{
 						error: "Failed to load extraction results for some assets",
-						missingJobIds,
+						missingJobIds: assetAggregate.missingJobIds,
 					},
 					{ status: 500 }
 				),
 			};
 		}
 
-		return { content: aggregatedContent, extractionJobIds, error: null };
+		if (notionAggregate.missingExtractionIds.length > 0) {
+			return {
+				content: null,
+				extractionJobIds: assetAggregate.extractionJobIds,
+				error: NextResponse.json(
+					{
+						error:
+							"Some Notion sources are missing extracted content. Re-process those sources before classification.",
+						missingSourceIds: notionAggregate.missingExtractionIds,
+					},
+					{ status: 400 }
+				),
+			};
+		}
+
+		if (aggregatedContent.length === 0) {
+			return {
+				content: null,
+				extractionJobIds: assetAggregate.extractionJobIds,
+				error: NextResponse.json(
+					{
+						error:
+							"No extracted content found for this project. Process at least one source first.",
+					},
+					{ status: 400 }
+				),
+			};
+		}
+
+		return {
+			content: aggregatedContent,
+			extractionJobIds: assetAggregate.extractionJobIds,
+			error: null,
+		};
 	} catch (error) {
 		const message =
 			error instanceof Error
@@ -507,7 +625,7 @@ export async function POST(request: NextRequest) {
 			return validation.error;
 		}
 
-		const { extractionJobId, themePageId, projectId } = validation;
+		const { extractionJobId, themePageId, projectId, modelConfig } = validation;
 
 		const extractionContext = await resolveExtractionContext({
 			projectId,
@@ -549,13 +667,16 @@ export async function POST(request: NextRequest) {
 		);
 
 		// Start processing in the background
+		const modelId = getModelForTask("classification", modelConfig);
+
 		processClassificationJob(
 			job.id,
 			extractionJobIds,
 			themePageId,
 			extractedContent,
 			themes,
-			resolvedProjectId
+			resolvedProjectId,
+			modelId
 		).catch((error) => {
 			console.error(`Classification job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
@@ -565,7 +686,7 @@ export async function POST(request: NextRequest) {
 			{
 				jobId: job.id,
 				status: job.status,
-				extractionJobId: extractionJobIds[0],
+				extractionJobId: extractionJobIds[0] ?? "notion",
 				extractionJobIds,
 				themePageId,
 				projectId: resolvedProjectId,
@@ -666,7 +787,8 @@ async function processClassificationJob(
 	themePageId: string,
 	content: ExtractedContent[],
 	themes: MainTheme[],
-	projectId?: string
+	projectId?: string,
+	modelId?: string
 ) {
 	// Classify content in batches
 	const classifiedContent = await classifyContentBatch(
@@ -674,7 +796,8 @@ async function processClassificationJob(
 		themes,
 		async (processed, total) => {
 			await updateJobProgress(jobId, processed, total);
-		}
+		},
+		modelId
 	);
 
 	// Update multi-use flags based on theme count
@@ -689,7 +812,7 @@ async function processClassificationJob(
 	// Build full results
 	const fullResults: ClassificationJobResults = {
 		jobId,
-		extractionJobId: extractionJobIds[0] ?? "unknown",
+		extractionJobId: extractionJobIds[0] ?? "notion",
 		extractionJobIds,
 		projectId,
 		themePageId,

@@ -227,7 +227,18 @@ export async function processOcrJob(
 
 	// Final status update
 	ocrStatus.pagesProcessed = processedCount;
-	ocrStatus.status = errors.length > 0 ? "processing" : "completed";
+	const allFailed = errors.length > 0 && errors.length === totalPages;
+	ocrStatus.status = allFailed ? "failed" : "completed";
+	ocrStatus.completedAt = new Date().toISOString();
+	if (errors.length > 0) {
+		const errorSummary = errors.slice(0, 5).join("; ");
+		ocrStatus.error =
+			errors.length > 5
+				? `${errorSummary} (+${errors.length - 5} more)`
+				: errorSummary;
+	} else {
+		ocrStatus.error = undefined;
+	}
 	await storeOcrStatus(assetId, ocrStatus);
 
 	return {
@@ -332,6 +343,15 @@ export async function retryPagesWithClaude(
 		ocrStatus.status = "completed";
 		ocrStatus.retriedCount = retriedCount;
 		ocrStatus.completedAt = new Date().toISOString();
+		if (errors.length > 0) {
+			const errorSummary = errors.slice(0, 5).join("; ");
+			ocrStatus.error =
+				errors.length > 5
+					? `${errorSummary} (+${errors.length - 5} more)`
+					: errorSummary;
+		} else {
+			ocrStatus.error = undefined;
+		}
 		await storeOcrStatus(assetId, ocrStatus);
 	}
 

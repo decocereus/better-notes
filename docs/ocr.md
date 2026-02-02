@@ -1,5 +1,8 @@
 # OCR Pipeline Migration Plan (Railway Converter)
 
+Status: Implemented. Use this doc as reference; see `docs/local-e2e.md` for
+local converter run steps.
+
 Goal: replace CloudConvert with a self-hosted PDF → image converter running in a Railway container (Poppler or MuPDF), keep R2 storage and the existing OCR pipeline intact.
 
 ## Architecture (Target)

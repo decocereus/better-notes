@@ -4,13 +4,19 @@ Track completed work, current status, and next steps.
 
 ## Current Status
 
-**Chunked Essay Processing** ✅ - Retry logic + gap detection for large PDFs
-**Extraction Quality & Parallelization** ✅ - Few-shot prompts + parallel batch processing
-**Extracted Content Browser UI Redesign** ✅ - Scholarly aesthetic with collapsible hierarchy
-**Self-Hosted PDF Converter Migration Complete** ✅ - Railway converter replaces CloudConvert
-**Patterns Library UX + Re-extract** ✅ - Markdown highlights, clearer cards, re-extract from OCR
-**Build Status:** ✅ Passing (all issues resolved)
-**Tests:** ✅ 159 passing
+**End-to-End Pipeline (Notion → Classify → Compare → Generate)** ✅ Implemented
+**Local Converter Integration** ✅ Implemented (validation pending)
+**E2E Validation Gaps:** Local converter wiring check, sample PDF run, integration tests, backfills (see `docs/e2e_todos.md`)
+**Build Status:** ✅ Passing (`bun run build`)
+**Tests:** ✅ 157 passing (`bun run test`)
+
+---
+
+## E2E Pipeline Status (2026-02-02) - Implemented, Validation Pending
+
+Core pipeline flows (Notion sources → extraction → classification → comparison → note generation → Notion sync)
+are implemented. Remaining validation steps are tracked in `docs/e2e_todos.md`, including local converter wiring,
+sample PDF roundtrip, integration tests for Notion aggregation, and any backfills/migrations.
 
 ---
 

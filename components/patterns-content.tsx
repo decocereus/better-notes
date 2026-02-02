@@ -104,7 +104,7 @@ function sanitizeExtractedItems(items: ExtractedContent[]): ExtractedContent[] {
  * Patterns page content - displays extracted content and extraction status.
  */
 export function PatternsContent() {
-	const { isHydrated } = useSettings();
+	const { isHydrated, settings } = useSettings();
 	const [extractedItems, setExtractedItems] = useState<ExtractedContent[]>([]);
 	const [summary, setSummary] = useState<{
 		totalItems: number;
@@ -252,7 +252,11 @@ export function PatternsContent() {
 			const response = await fetch("/api/extract", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ assetId: selectedAssetId }),
+				body: JSON.stringify({
+					assetId: selectedAssetId,
+					parameters: settings.extractionParameters,
+					modelConfig: settings.modelConfig,
+				}),
 			});
 
 			if (!response.ok) {

@@ -9,7 +9,7 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { validateAIConfig } from "@/lib/ai";
+import { getModel, validateAIConfig } from "@/lib/ai";
 import {
 	detectEssayBoundaries,
 	extractContentBatch,
@@ -19,6 +19,7 @@ import {
 	validateBoundaries,
 	validateLargePdfBoundaries,
 } from "@/lib/extraction";
+import { getModelForTask } from "@/lib/llm/provider";
 import {
 	addJobError,
 	addJobResult,
@@ -171,8 +172,9 @@ export async function POST(request: NextRequest) {
 		const body = (await request.json()) as StartExtractionJobInput & {
 			parameters?: ExtractionParameters;
 			assetId?: string;
+			modelConfig?: Record<string, string>;
 		};
-		const { ocrJobId, parameters, assetId } = body;
+		const { ocrJobId, parameters, assetId, modelConfig } = body;
 
 		// Need either assetId or ocrJobId
 		if (!(assetId || ocrJobId)) {
@@ -208,12 +210,15 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Start processing in the background
+		const modelId = getModelForTask("pattern_extraction", modelConfig);
+
 		processExtractionJob(
 			job.id,
 			ocrJobId,
 			ocrResults,
 			extractionParams,
-			assetId
+			assetId,
+			modelId
 		).catch((error) => {
 			console.error(`Extraction job ${job.id} failed:`, error);
 			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
@@ -538,7 +543,8 @@ async function logChunkProcessingIssues(
 async function processLargePdfExtraction(
 	jobId: string,
 	ocrResults: OcrJobResults,
-	parameters: ExtractionParameters
+	parameters: ExtractionParameters,
+	modelId?: string
 ): Promise<ExtractionProcessResult> {
 	console.log(
 		`[ExtractionJob ${jobId}] Large PDF detected (${ocrResults.totalPages} pages), using chunked processing`
@@ -556,7 +562,8 @@ async function processLargePdfExtraction(
 		},
 		async (_processedChunks, _totalChunks, currentEssay, totalEssays) => {
 			await updateJobProgress(jobId, currentEssay, totalEssays);
-		}
+		},
+		modelId
 	);
 
 	await logChunkProcessingIssues(jobId, stats);
@@ -578,13 +585,18 @@ async function processLargePdfExtraction(
 async function processStandardExtraction(
 	jobId: string,
 	ocrResults: OcrJobResults,
-	parameters: ExtractionParameters
+	parameters: ExtractionParameters,
+	modelId?: string
 ): Promise<ExtractionProcessResult> {
 	console.log(
 		`[ExtractionJob ${jobId}] Standard processing for ${ocrResults.totalPages} pages`
 	);
 
-	const boundaries = await detectEssayBoundaries(ocrResults.pages);
+	const boundaries = await detectEssayBoundaries(
+		ocrResults.pages,
+		undefined,
+		modelId
+	);
 
 	const validation = validateBoundaries(boundaries, ocrResults.totalPages);
 	if (!validation.valid) {
@@ -619,14 +631,29 @@ async function processStandardExtraction(
 		title: boundary.title,
 	}));
 
-	const extractionResults = await extractContentBatch(
-		essays,
-		parameters,
-		ocrResults.sourceKey,
-		async (processed, total) => {
-			await updateJobProgress(jobId, processed, total);
-		}
-	);
+	const modelFactory = modelId
+		? () => getModel("EXTRACTION", modelId)
+		: undefined;
+
+	const extractionResults = modelFactory
+		? await extractContentBatch(
+				essays,
+				parameters,
+				ocrResults.sourceKey,
+				async (processed, total) => {
+					await updateJobProgress(jobId, processed, total);
+				},
+				undefined,
+				modelFactory
+			)
+		: await extractContentBatch(
+				essays,
+				parameters,
+				ocrResults.sourceKey,
+				async (processed, total) => {
+					await updateJobProgress(jobId, processed, total);
+				}
+			);
 
 	return {
 		extractionResults,
@@ -695,12 +722,13 @@ async function processExtractionJob(
 	ocrJobId: string,
 	ocrResults: OcrJobResults,
 	parameters: ExtractionParameters,
-	assetId?: string
+	assetId?: string,
+	modelId?: string
 ) {
 	const isLargePdf = ocrResults.totalPages > CHUNKED_PROCESSING_THRESHOLD;
 	const { extractionResults, processingStats } = isLargePdf
-		? await processLargePdfExtraction(jobId, ocrResults, parameters)
-		: await processStandardExtraction(jobId, ocrResults, parameters);
+		? await processLargePdfExtraction(jobId, ocrResults, parameters, modelId)
+		: await processStandardExtraction(jobId, ocrResults, parameters, modelId);
 
 	// Collect all items
 	const allItems = extractionResults.flatMap((r) => r.items);

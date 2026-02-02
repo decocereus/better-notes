@@ -11,6 +11,7 @@ import {
 	MAX_FILE_SIZE_BYTES,
 	MAX_FILE_SIZE_DISPLAY,
 } from "@/lib/constants/upload";
+import type { ExtractionParameters } from "@/types/extraction";
 import type { UploadResponse } from "@/types/upload";
 
 interface UploadZoneProps {
@@ -21,6 +22,8 @@ interface UploadZoneProps {
 	multiple?: boolean;
 	/** Whether to automatically process PDFs (OCR + extraction) after upload */
 	autoProcess?: boolean;
+	parameters?: ExtractionParameters;
+	modelConfig?: Record<string, string>;
 }
 
 interface FileWithPreview {
@@ -87,7 +90,9 @@ async function uploadToR2(
 	file: File,
 	projectId: string,
 	onProgress: (progress: number) => void,
-	autoProcess = false
+	autoProcess = false,
+	parameters?: ExtractionParameters,
+	modelConfig?: Record<string, string>
 ): Promise<UploadResponse & { assetId?: string }> {
 	// Step 1: Get signed upload URL
 	const urlResponse = await fetch("/api/storage/upload-url", {
@@ -149,6 +154,8 @@ async function uploadToR2(
 				mimeType: file.type,
 				projectId: projectId === "unassigned" ? undefined : projectId,
 				autoProcess: autoProcess && file.type === "application/pdf",
+				parameters,
+				modelConfig,
 			}),
 		});
 
@@ -181,6 +188,8 @@ export function UploadZone({
 	disabled = false,
 	multiple = false,
 	autoProcess = false,
+	parameters,
+	modelConfig,
 }: UploadZoneProps) {
 	const [isDragging, setIsDragging] = useState(false);
 	const [files, setFiles] = useState<FileWithPreview[]>([]);
@@ -209,7 +218,9 @@ export function UploadZone({
 					file,
 					resolvedProjectId,
 					(progress) => updateFileProgress(index, progress),
-					autoProcess
+					autoProcess,
+					parameters,
+					modelConfig
 				);
 
 				setFiles((prev) =>
@@ -240,6 +251,8 @@ export function UploadZone({
 			onUploadError,
 			updateFileProgress,
 			autoProcess,
+			parameters,
+			modelConfig,
 		]
 	);
 

@@ -228,7 +228,8 @@ Identify where each individual essay starts and ends. Consider word count, conte
  */
 export async function detectEssayBoundaries(
 	ocrResults: OcrPageResult[],
-	onProgress?: (processed: number, total: number) => void
+	onProgress?: (processed: number, total: number) => void,
+	modelId?: string
 ): Promise<EssayBoundary[]> {
 	if (ocrResults.length === 0) {
 		return [];
@@ -251,23 +252,24 @@ export async function detectEssayBoundaries(
 
 	// For small documents, use single-batch processing
 	if (sorted.length <= PAGES_PER_BATCH) {
-		return await detectBoundariesInBatch(sorted);
+		return await detectBoundariesInBatch(sorted, modelId);
 	}
 
 	// For large documents, use chunked parallel processing
 	console.log(
 		`[EssayDetector] Large PDF detected (${sorted.length} pages), using chunked processing`
 	);
-	return await detectBoundariesChunked(sorted, onProgress);
+	return await detectBoundariesChunked(sorted, onProgress, modelId);
 }
 
 /**
  * Detects boundaries in a single batch of pages.
  */
 async function detectBoundariesInBatch(
-	ocrResults: OcrPageResult[]
+	ocrResults: OcrPageResult[],
+	modelId?: string
 ): Promise<EssayBoundary[]> {
-	const model = getModel("EXTRACTION");
+	const model = getModel("EXTRACTION", modelId);
 	const prompt = createBoundaryDetectionPrompt(ocrResults);
 
 	try {
@@ -345,10 +347,12 @@ async function detectBatchWithRetries({
 	batch,
 	batchIndex,
 	totalBatches,
+	modelId,
 }: {
 	batch: PageBatch;
 	batchIndex: number;
 	totalBatches: number;
+	modelId?: string;
 }): Promise<{ boundaries: EssayBoundary[]; failed: boolean }> {
 	for (let attempt = 0; attempt <= MAX_BATCH_RETRIES; attempt++) {
 		if (attempt > 0) {
@@ -359,7 +363,7 @@ async function detectBatchWithRetries({
 		}
 
 		try {
-			const boundaries = await detectBoundariesInBatch(batch.pages);
+			const boundaries = await detectBoundariesInBatch(batch.pages, modelId);
 			return { boundaries, failed: false };
 		} catch (error) {
 			const errorMessage =
@@ -398,7 +402,8 @@ async function delayBetweenBatches(
  */
 async function detectBoundariesChunked(
 	ocrResults: OcrPageResult[],
-	onProgress?: (processed: number, total: number) => void
+	onProgress?: (processed: number, total: number) => void,
+	modelId?: string
 ): Promise<EssayBoundary[]> {
 	// Create batches with overlap to detect cross-boundary essays
 	const batches = createPageBatches(
@@ -421,6 +426,7 @@ async function detectBoundariesChunked(
 			batch,
 			batchIndex,
 			totalBatches,
+			modelId,
 		});
 
 		allBoundaries[batchIndex] = boundaries;
