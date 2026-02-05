@@ -72,6 +72,7 @@ JSON shape:
   "extractionNotes": "optional",
   "summary": { "introductions": 0, "conclusions": 0, "examples": 0, "quotes": 0, "thinkers": 0, "arguments": 0, "booksPoems": 0, "keywords": 0 }
 }
+If the essay contains substantive text, do NOT return an empty "items" array. Include at least 6 items and mark them "low" if needed.
 No markdown fences, no extra text.`;
 
 const SECTION_TO_CONTENT_TYPE: [RegExp, ContentType][] = [
@@ -147,6 +148,15 @@ function normalizeQuality(text: string): ExtractedItem["quality"] {
 
 function stripMarkdown(line: string): string {
 	return line.replace(/[*_`]/g, "").trim();
+}
+
+function normalizeModelQuality(
+	quality: ExtractedItem["quality"] | undefined
+): ExtractedItem["quality"] {
+	if (quality === "high" || quality === "medium" || quality === "low") {
+		return quality;
+	}
+	return "medium";
 }
 
 function isHeadingLine(line: string): boolean {
@@ -468,11 +478,15 @@ export async function extractContentFromEssay(
 	sourceRef: string,
 	essayTitle?: string,
 	modelFactory?: () => ReturnType<typeof getModel>
-): Promise<{ items: ExtractedContent[]; sections: ExtractionSection[] }> {
+): Promise<{
+	items: ExtractedContent[];
+	sections: ExtractionSection[];
+	usedQualityFallback: boolean;
+}> {
 	// Skip very short essays
 	const wordCount = essayText.split(WORD_SPLIT_REGEX).filter(Boolean).length;
 	if (wordCount < 100) {
-		return { items: [], sections: [] };
+		return { items: [], sections: [], usedQualityFallback: false };
 	}
 
 	// Use factory for fresh instance if provided, otherwise default model
@@ -546,12 +560,18 @@ export async function extractContentFromEssay(
 		parameters.minQualityThreshold
 	);
 
+	const usedQualityFallback =
+		filteredItems.length === 0 && extractedContent.length > 0;
+	const items = usedQualityFallback
+		? selectFallbackItems(extractedContent)
+		: filteredItems;
+
 	const sections =
 		extractedSections.length > 0
 			? extractedSections
-			: buildSectionsFromItems(filteredItems);
+			: buildSectionsFromItems(items);
 
-	return { items: filteredItems, sections };
+	return { items, sections, usedQualityFallback };
 }
 
 /**
@@ -562,19 +582,14 @@ function convertToExtractedContent(
 	sourceRef: string,
 	parameters: ExtractionParameters
 ): ExtractedContent {
-	// Re-assess quality and flags using our local functions
-	const qualityResult = calculateQuality(
-		item.verbatimText || item.content,
-		item.contentType
-	);
-	const overused = isOverusedExample(
-		item.verbatimText || item.content,
-		parameters.overusedExamples
-	);
-	const multiUse = assessMultiUse(
-		item.verbatimText || item.content,
-		item.contentType
-	);
+	const verbatimText = item.verbatimText?.trim() || undefined;
+	const quality = verbatimText
+		? calculateQuality(verbatimText, item.contentType).quality
+		: normalizeModelQuality(item.quality);
+
+	const textForFlags = verbatimText ?? item.content;
+	const overused = isOverusedExample(textForFlags, parameters.overusedExamples);
+	const multiUse = assessMultiUse(textForFlags, item.contentType);
 
 	return {
 		id: crypto.randomUUID(),
@@ -583,10 +598,10 @@ function convertToExtractedContent(
 		contentType: item.contentType,
 		exampleCategory: item.exampleCategory,
 		content: item.content,
-		verbatimText: item.verbatimText,
+		verbatimText,
 		context: item.context,
 		detailsMarkdown: item.detailsMarkdown,
-		quality: qualityResult.quality,
+		quality,
 		isOverused: overused || item.isOverused,
 		multiUse: multiUse || item.multiUse,
 		themes: [], // Will be classified in a separate step
@@ -595,6 +610,36 @@ function convertToExtractedContent(
 		sourcePageEnd: item.sourcePageEnd,
 		createdAt: new Date().toISOString(),
 	};
+}
+
+const FALLBACK_ITEM_LIMIT = 6;
+
+function selectFallbackItems(items: ExtractedContent[]): ExtractedContent[] {
+	if (items.length <= FALLBACK_ITEM_LIMIT) {
+		return items;
+	}
+
+	const qualityScore: Record<ExtractedContent["quality"], number> = {
+		high: 3,
+		medium: 2,
+		low: 1,
+	};
+
+	return [...items]
+		.sort((a, b) => {
+			const qualityDiff = qualityScore[b.quality] - qualityScore[a.quality];
+			if (qualityDiff !== 0) {
+				return qualityDiff;
+			}
+			if (a.isOverused !== b.isOverused) {
+				return a.isOverused ? 1 : -1;
+			}
+			if (a.multiUse !== b.multiUse) {
+				return a.multiUse ? -1 : 1;
+			}
+			return 0;
+		})
+		.slice(0, FALLBACK_ITEM_LIMIT);
 }
 
 /** Default concurrency for parallel extraction */
@@ -738,13 +783,14 @@ async function extractSingleEssay(
 ): Promise<EssayExtractionResult> {
 	const startTime = Date.now();
 
-	const { items, sections } = await extractContentFromEssay(
-		essay.text,
-		parameters,
-		sourceRef,
-		essay.title,
-		modelFactory
-	);
+	const { items, sections, usedQualityFallback } =
+		await extractContentFromEssay(
+			essay.text,
+			parameters,
+			sourceRef,
+			essay.title,
+			modelFactory
+		);
 
 	const processingTimeMs = Date.now() - startTime;
 
@@ -763,6 +809,8 @@ async function extractSingleEssay(
 	let extractionNotes = "Standard extraction";
 	if (items.length === 0) {
 		extractionNotes = "No items extracted - possible parsing failure";
+	} else if (usedQualityFallback) {
+		extractionNotes = `No items met ${parameters.minQualityThreshold} quality threshold - included best available items`;
 	} else if (items.length < 3) {
 		extractionNotes = "Minimal extraction - possible content quality issues";
 	} else if (overallQuality === "high" && items.length >= 8) {
@@ -881,12 +929,15 @@ function calculateOverallQuality(
 export function getExtractionStats(results: EssayExtractionResult[]): {
 	totalEssays: number;
 	totalItems: number;
+	essaysWithItems: number;
+	essaysWithZeroItems: number;
 	byType: Record<ContentType, number>;
 	byQuality: Record<ExtractedContent["quality"], number>;
 	overusedCount: number;
 	multiUseCount: number;
 } {
 	const allItems = results.flatMap((r) => r.items);
+	const essaysWithItems = results.filter((r) => r.items.length > 0).length;
 
 	const byType: Record<ContentType, number> = {
 		introduction: 0,
@@ -922,6 +973,8 @@ export function getExtractionStats(results: EssayExtractionResult[]): {
 	return {
 		totalEssays: results.length,
 		totalItems: allItems.length,
+		essaysWithItems,
+		essaysWithZeroItems: results.length - essaysWithItems,
 		byType,
 		byQuality,
 		overusedCount,

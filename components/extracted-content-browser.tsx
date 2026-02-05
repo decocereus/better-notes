@@ -452,7 +452,7 @@ export function ExtractedContentBrowser({
 					<p className="text-center text-muted-foreground text-xs">
 						Showing {(currentPage - 1) * essaysPerPage + 1}–
 						{Math.min(currentPage * essaysPerPage, totalEssays)} of{" "}
-						{totalEssays} total essays
+						{totalEssays} essays with patterns
 					</p>
 				</div>
 			)}

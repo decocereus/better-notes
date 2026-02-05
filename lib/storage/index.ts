@@ -4,6 +4,11 @@
  */
 
 export {
+	getEssayBoundariesKey,
+	loadEssayBoundaries,
+	storeEssayBoundaries,
+} from "./essay-boundaries";
+export {
 	buildNoteStorageKey,
 	listNoteKeys,
 	loadNote,
@@ -13,6 +18,7 @@ export {
 export {
 	getAllOcrResults,
 	getCombinedOcrResults,
+	getOcrResultsForPages,
 	getOcrStatus,
 	getPageOcrResult,
 	isOcrComplete,

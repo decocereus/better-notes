@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ExtractedContentBrowser } from "@/components/extracted-content-browser";
+import { ReextractPatternsDialog } from "@/components/reextract-patterns-dialog";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -19,21 +20,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { useExtractionSse } from "@/lib/hooks/use-extraction-sse";
 import { useSettings } from "@/lib/hooks/use-settings";
 import type { ContentType, ExtractedContent } from "@/types/extraction";
@@ -45,15 +31,6 @@ interface PatternsResponse {
 	sources: number;
 	lastUpdatedAt?: string | null;
 	sections?: Partial<Record<ContentType, string[]>>;
-}
-
-interface ReextractAsset {
-	id: string;
-	filename: string;
-	processingStatus: string;
-	sourceType: string;
-	ocrWordCount?: number;
-	extractedItemCount?: number;
 }
 
 const QUALITY_ONLY_REGEX = /^(high|medium|low)(\s+quality)?$/i;
@@ -109,6 +86,7 @@ export function PatternsContent() {
 	const [summary, setSummary] = useState<{
 		totalItems: number;
 		totalEssays: number;
+		essaysWithPatterns: number;
 		sources: number;
 		lastUpdatedAt?: string | null;
 	} | null>(null);
@@ -116,11 +94,6 @@ export function PatternsContent() {
 	const [error, setError] = useState<string | null>(null);
 	const [activeJobId, setActiveJobId] = useState<string | null>(null);
 	const [reextractOpen, setReextractOpen] = useState(false);
-	const [assets, setAssets] = useState<ReextractAsset[]>([]);
-	const [assetsError, setAssetsError] = useState<string | null>(null);
-	const [assetsLoading, setAssetsLoading] = useState(false);
-	const [selectedAssetId, setSelectedAssetId] = useState<string>("");
-	const [isReextracting, setIsReextracting] = useState(false);
 
 	// Load extracted items from server (Convex + R2)
 	const loadExtractedItems = useCallback(async () => {
@@ -134,10 +107,16 @@ export function PatternsContent() {
 			}
 			const data = (await response.json()) as PatternsResponse;
 			const cleanedItems = sanitizeExtractedItems(data.items ?? []);
+			const essaysWithPatterns = new Set(
+				cleanedItems.map((item) =>
+					item.essayTitle ? item.essayTitle : `Essay #${item.essayIndex ?? "?"}`
+				)
+			).size;
 			setExtractedItems(cleanedItems);
 			setSummary({
 				totalItems: cleanedItems.length,
 				totalEssays: data.totalEssays ?? 0,
+				essaysWithPatterns,
 				sources: data.sources ?? 0,
 				lastUpdatedAt: data.lastUpdatedAt ?? null,
 			});
@@ -174,110 +153,12 @@ export function PatternsContent() {
 		}
 	}, [isHydrated, loadExtractedItems]);
 
-	useEffect(() => {
-		if (!reextractOpen) {
-			return;
-		}
-
-		const controller = new AbortController();
-
-		const fetchAssets = async () => {
-			const response = await fetch("/api/assets", {
-				signal: controller.signal,
-			});
-			if (!response.ok) {
-				throw new Error("Failed to load assets");
-			}
-			const data = (await response.json()) as { assets: ReextractAsset[] };
-			return data.assets ?? [];
-		};
-
-		setAssetsLoading(true);
-		setAssetsError(null);
-
-		fetchAssets()
-			.then(setAssets)
-			.catch((err) => {
-				if (err instanceof Error && err.name !== "AbortError") {
-					setAssetsError(err.message);
-				}
-			})
-			.finally(() => {
-				if (!controller.signal.aborted) {
-					setAssetsLoading(false);
-				}
-			});
-
-		return () => {
-			controller.abort();
-		};
-	}, [reextractOpen]);
-
-	useEffect(() => {
-		if (!reextractOpen) {
-			setSelectedAssetId("");
-			setAssetsError(null);
-		}
-	}, [reextractOpen]);
-
 	const handleRefresh = () => {
 		loadExtractedItems();
 	};
 
 	const handleClearAll = () => {
 		setExtractedItems([]);
-	};
-
-	const eligibleAssets = assets.filter(
-		(asset) =>
-			asset.sourceType === "pdf" &&
-			[
-				"ocr_completed",
-				"extraction_failed",
-				"extraction_completed",
-				"extraction_processing",
-			].includes(asset.processingStatus)
-	);
-
-	const handleReextract = async () => {
-		if (!selectedAssetId) {
-			setAssetsError("Select an asset to re-extract.");
-			return;
-		}
-
-		setIsReextracting(true);
-		setAssetsError(null);
-
-		try {
-			const response = await fetch("/api/extract", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					assetId: selectedAssetId,
-					parameters: settings.extractionParameters,
-					modelConfig: settings.modelConfig,
-				}),
-			});
-
-			if (!response.ok) {
-				const data = (await response.json()) as { error?: string };
-				throw new Error(data.error ?? "Failed to start re-extraction");
-			}
-
-			const data = (await response.json()) as { jobId?: string };
-			if (data.jobId) {
-				setActiveJobId(data.jobId);
-			}
-
-			setReextractOpen(false);
-			setSelectedAssetId("");
-		} catch (err) {
-			setAssetsError(
-				err instanceof Error ? err.message : "Failed to start re-extraction"
-			);
-		} finally {
-			setIsReextracting(false);
-		}
 	};
 
 	if (!isHydrated || isLoading) {
@@ -345,55 +226,13 @@ export function PatternsContent() {
 				</Card>
 			)}
 
-			{/* Re-extract Dialog */}
-			<Dialog onOpenChange={setReextractOpen} open={reextractOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Re-extract patterns</DialogTitle>
-						<DialogDescription>
-							Choose a PDF that already has OCR results, then rerun extraction.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="space-y-3">
-						<Select onValueChange={setSelectedAssetId} value={selectedAssetId}>
-							<SelectTrigger>
-								<SelectValue placeholder="Select an asset" />
-							</SelectTrigger>
-							<SelectContent>
-								{eligibleAssets.map((asset) => (
-									<SelectItem key={asset.id} value={asset.id}>
-										{asset.filename}
-									</SelectItem>
-								))}
-								{eligibleAssets.length === 0 && (
-									<SelectItem disabled value="none">
-										No eligible assets
-									</SelectItem>
-								)}
-							</SelectContent>
-						</Select>
-
-						{assetsLoading && (
-							<p className="text-muted-foreground text-sm">Loading assets...</p>
-						)}
-						{assetsError && (
-							<p className="text-destructive text-sm">{assetsError}</p>
-						)}
-					</div>
-					<DialogFooter>
-						<Button
-							disabled={isReextracting}
-							onClick={() => setReextractOpen(false)}
-							variant="outline"
-						>
-							Cancel
-						</Button>
-						<Button disabled={isReextracting} onClick={handleReextract}>
-							{isReextracting ? "Starting..." : "Re-extract"}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<ReextractPatternsDialog
+				modelConfig={settings.modelConfig}
+				onJobStarted={(jobId) => setActiveJobId(jobId)}
+				onOpenChange={setReextractOpen}
+				open={reextractOpen}
+				savedExtractionParameters={settings.extractionParameters}
+			/>
 
 			{/* Active job progress */}
 			{activeJobId && (
@@ -457,6 +296,10 @@ export function PatternsContent() {
 								<p className="font-semibold text-lg tabular-nums">
 									{summary.totalEssays.toLocaleString()}
 								</p>
+								<EssaysWithPatternsMeta
+									essaysWithPatterns={summary.essaysWithPatterns}
+									totalEssays={summary.totalEssays}
+								/>
 							</div>
 							<div className="rounded-lg border p-3">
 								<p className="text-muted-foreground text-xs">Sources</p>
@@ -512,6 +355,11 @@ export function PatternsContent() {
 						<ClearAllDialog onClear={handleClearAll} />
 					</div>
 
+					<MissingEssaysCallout
+						onReextract={() => setReextractOpen(true)}
+						summary={summary}
+					/>
+
 					{/* Content browser */}
 					<ExtractedContentBrowser items={extractedItems} />
 				</>
@@ -542,6 +390,62 @@ export function PatternsContent() {
 				</div>
 			</Card>
 		</div>
+	);
+}
+
+function EssaysWithPatternsMeta({
+	totalEssays,
+	essaysWithPatterns,
+}: {
+	totalEssays: number;
+	essaysWithPatterns: number;
+}) {
+	if (totalEssays <= essaysWithPatterns) {
+		return null;
+	}
+
+	return (
+		<p className="mt-1 text-muted-foreground text-xs">
+			with patterns:{" "}
+			<span className="font-medium text-foreground tabular-nums">
+				{essaysWithPatterns.toLocaleString()}
+			</span>
+		</p>
+	);
+}
+
+function MissingEssaysCallout({
+	summary,
+	onReextract,
+}: {
+	summary: {
+		totalEssays: number;
+		essaysWithPatterns: number;
+	} | null;
+	onReextract: () => void;
+}) {
+	if (!summary || summary.totalEssays <= summary.essaysWithPatterns) {
+		return null;
+	}
+
+	return (
+		<Card className="border-amber-500/20 bg-amber-500/10 p-4">
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<p className="font-medium">Some essays have no extracted patterns</p>
+					<p className="mt-1 text-muted-foreground text-sm">
+						Only {summary.essaysWithPatterns.toLocaleString()} of{" "}
+						{summary.totalEssays.toLocaleString()} essays produced patterns.
+						This usually happens when extraction returns 0 usable items (often
+						because of strict quality filtering or model parsing issues).
+						Re-extract with a lower quality threshold to backfill.
+					</p>
+				</div>
+				<Button onClick={onReextract} variant="outline">
+					Re-extract
+				</Button>
+			</div>
+		</Card>
 	);
 }
 

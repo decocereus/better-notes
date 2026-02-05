@@ -156,7 +156,7 @@ export const DEFAULT_EXTRACTION_PARAMETERS: ExtractionParameters = {
 		"mandela",
 		"vasudhaiva kutumbakam",
 	],
-	minQualityThreshold: "medium",
+	minQualityThreshold: "low",
 	extractCrossThemeRefs: true,
 };
 

@@ -5,6 +5,8 @@
 
 import type { ExampleCategory, ExtractionParameters } from "@/types/extraction";
 
+const WORD_SPLIT_REGEX = /\s+/;
+
 /**
  * System prompt for comprehensive content extraction.
  */
@@ -191,6 +193,10 @@ export function createExtractionPrompt(
 		.map((cat) => `- ${cat}: ${EXAMPLE_CATEGORY_DESCRIPTIONS[cat]}`)
 		.join("\n");
 
+	const approxWordCount = essayText
+		.split(WORD_SPLIT_REGEX)
+		.filter(Boolean).length;
+
 	const thinkerGuidance = getThinkerGuidance(parameters.thinkerPriority);
 	const quoteGuidance = getQuoteGuidance(parameters.quoteStyle);
 	const overusedList = parameters.overusedExamples.join(", ");
@@ -198,6 +204,7 @@ export function createExtractionPrompt(
 	return `Analyze the following UPSC topper essay and extract valuable content.
 
 ${essayTitle ? `Essay Topic: ${essayTitle}` : ""}
+Approx word count: ${approxWordCount}
 
 === ESSAY TEXT ===
 ${essayText}
@@ -214,8 +221,9 @@ ${quoteGuidance}
 
 Overused Examples to Flag: ${overusedList}
 
-Minimum Quality Threshold: ${parameters.minQualityThreshold}
-(Only include content meeting or exceeding this quality level)
+Minimum Quality Threshold (for filtering later): ${parameters.minQualityThreshold}
+- Still extract your best candidates even if they are below this threshold; set "quality" honestly.
+- Never return an empty "items" array for a real essay. If unsure, return at least 6 items and mark them "low".
 
 ${parameters.extractCrossThemeRefs ? "Identify cross-theme applicability for multi-use content." : ""}
 

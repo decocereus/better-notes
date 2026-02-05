@@ -10,6 +10,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { getModel, validateAIConfig } from "@/lib/ai";
+import { getFreshModel } from "@/lib/ai/client";
 import {
 	detectEssayBoundaries,
 	extractContentBatch,
@@ -29,8 +30,15 @@ import {
 	getJob,
 	updateJobProgress,
 } from "@/lib/processing";
-import { downloadFromR2, uploadToR2, validateR2Config } from "@/lib/storage";
+import {
+	downloadFromR2,
+	loadEssayBoundaries,
+	storeEssayBoundaries,
+	uploadToR2,
+	validateR2Config,
+} from "@/lib/storage";
 import type {
+	EssayBoundary,
 	EssayExtractionResult,
 	ExtractedContent,
 	ExtractionParameters,
@@ -160,6 +168,137 @@ async function updateAssetExtractionFailure(
  * - assetId only: Uses new per-page OCR format from R2
  * - ocrJobId: Uses legacy OCR job results format
  */
+type ValidStartExtractionRequest = Pick<
+	StartExtractionJobInput,
+	| "ocrJobId"
+	| "parameters"
+	| "assetId"
+	| "modelConfig"
+	| "force"
+	| "onlyMissingEssays"
+	| "essayIndices"
+	| "recomputeBoundaries"
+> & { hasPartialRequest: boolean };
+
+function validateStartExtractionRequest(
+	body: StartExtractionJobInput
+):
+	| { valid: true; value: ValidStartExtractionRequest }
+	| { valid: false; response: NextResponse } {
+	const {
+		ocrJobId,
+		parameters,
+		assetId,
+		modelConfig,
+		force,
+		onlyMissingEssays,
+		essayIndices,
+		recomputeBoundaries,
+	} = body;
+
+	if (!(assetId || ocrJobId)) {
+		return {
+			valid: false,
+			response: NextResponse.json(
+				{ error: "Either assetId or ocrJobId is required" },
+				{ status: 400 }
+			),
+		};
+	}
+
+	const hasPartialRequest =
+		onlyMissingEssays === true || (essayIndices?.length ?? 0) > 0;
+
+	if (hasPartialRequest && !assetId) {
+		return {
+			valid: false,
+			response: NextResponse.json(
+				{ error: "Partial re-extraction requires assetId" },
+				{ status: 400 }
+			),
+		};
+	}
+
+	if (hasPartialRequest && recomputeBoundaries) {
+		return {
+			valid: false,
+			response: NextResponse.json(
+				{
+					error:
+						"recomputeBoundaries is not supported for partial re-extraction. Run a full re-extract if you need to recompute boundaries.",
+				},
+				{ status: 400 }
+			),
+		};
+	}
+
+	return {
+		valid: true,
+		value: {
+			ocrJobId,
+			parameters,
+			assetId,
+			modelConfig,
+			force,
+			onlyMissingEssays,
+			essayIndices,
+			recomputeBoundaries,
+			hasPartialRequest,
+		},
+	};
+}
+
+function startExtractionWithErrorHandling({
+	assetId,
+	jobId,
+	sourceKey,
+	loadAssetId,
+	loadOcrJobId,
+	metadataOcrJobId,
+	parameters,
+	modelId,
+	onlyMissingEssays,
+	essayIndices,
+	recomputeBoundaries,
+}: {
+	jobId: string;
+	sourceKey: string;
+	loadAssetId?: string;
+	loadOcrJobId?: string;
+	metadataOcrJobId?: string;
+	parameters: ExtractionParameters;
+	assetId?: string;
+	modelId?: string;
+	onlyMissingEssays?: boolean;
+	essayIndices?: number[];
+	recomputeBoundaries?: boolean;
+}): void {
+	startExtractionInBackground({
+		jobId,
+		sourceKey,
+		loadAssetId,
+		loadOcrJobId,
+		metadataOcrJobId,
+		parameters,
+		assetId,
+		modelId,
+		onlyMissingEssays,
+		essayIndices,
+		recomputeBoundaries,
+	}).catch((error) => {
+		console.error(`Extraction job ${jobId} failed:`, error);
+		failJob(jobId, error instanceof Error ? error.message : "Unknown error");
+		if (assetId) {
+			updateAssetExtractionFailure(
+				assetId,
+				error instanceof Error ? error.message : "Unknown error"
+			).catch(() => {
+				// Silently ignore failure update errors
+			});
+		}
+	});
+}
+
 export async function POST(request: NextRequest) {
 	try {
 		// Validate configurations
@@ -169,37 +308,37 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Parse request
-		const body = (await request.json()) as StartExtractionJobInput & {
-			parameters?: ExtractionParameters;
-			assetId?: string;
-			modelConfig?: Record<string, string>;
-		};
-		const { ocrJobId, parameters, assetId, modelConfig } = body;
-
-		// Need either assetId or ocrJobId
-		if (!(assetId || ocrJobId)) {
-			return NextResponse.json(
-				{ error: "Either assetId or ocrJobId is required" },
-				{ status: 400 }
-			);
+		const body = (await request.json()) as StartExtractionJobInput;
+		const validation = validateStartExtractionRequest(body);
+		if (!validation.valid) {
+			return validation.response;
 		}
+		const {
+			ocrJobId,
+			parameters,
+			assetId,
+			modelConfig,
+			force,
+			onlyMissingEssays,
+			essayIndices,
+			recomputeBoundaries,
+		} = validation.value;
+
+		const resolution = assetId
+			? await resolveAssetExtractionStart(assetId, force)
+			: await resolveLegacyExtractionStart(ocrJobId);
+
+		if (resolution.kind === "response") {
+			return resolution.response;
+		}
+
+		const { sourceKey, projectId, metadataOcrJobId } = resolution;
 
 		// Merge with default parameters
 		const extractionParams: ExtractionParameters = {
 			...DEFAULT_EXTRACTION_PARAMETERS,
 			...parameters,
 		};
-
-		// Load OCR results from appropriate source
-		const ocrData = await loadOcrResults(assetId, ocrJobId);
-		if (!ocrData.success) {
-			return NextResponse.json(
-				{ error: ocrData.error, status: ocrData.jobStatus },
-				{ status: ocrData.status }
-			);
-		}
-
-		const { results: ocrResults, sourceKey, projectId } = ocrData;
 
 		// Create the extraction job
 		const job = await createJob("extraction", sourceKey, projectId, 1);
@@ -212,24 +351,18 @@ export async function POST(request: NextRequest) {
 		// Start processing in the background
 		const modelId = getModelForTask("pattern_extraction", modelConfig);
 
-		processExtractionJob(
-			job.id,
-			ocrJobId,
-			ocrResults,
-			extractionParams,
+		startExtractionWithErrorHandling({
 			assetId,
-			modelId
-		).catch((error) => {
-			console.error(`Extraction job ${job.id} failed:`, error);
-			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
-			if (assetId) {
-				updateAssetExtractionFailure(
-					assetId,
-					error instanceof Error ? error.message : "Unknown error"
-				).catch(() => {
-					// Silently ignore failure update errors
-				});
-			}
+			jobId: job.id,
+			sourceKey,
+			loadAssetId: assetId,
+			loadOcrJobId: ocrJobId,
+			metadataOcrJobId,
+			parameters: extractionParams,
+			modelId,
+			onlyMissingEssays,
+			essayIndices,
+			recomputeBoundaries,
 		});
 
 		return NextResponse.json(
@@ -252,6 +385,581 @@ export async function POST(request: NextRequest) {
 			{ status: 500 }
 		);
 	}
+}
+
+type StartResolution =
+	| {
+			kind: "start";
+			sourceKey: string;
+			projectId?: string;
+			metadataOcrJobId?: string;
+	  }
+	| { kind: "response"; response: NextResponse };
+
+async function resolveAssetExtractionStart(
+	assetId: string,
+	force?: boolean
+): Promise<StartResolution> {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{ error: "Convex not configured" },
+				{ status: 503 }
+			),
+		};
+	}
+
+	const { ConvexHttpClient } = await import("convex/browser");
+	const { api } = await import("@/convex/_generated/api");
+	const convex = new ConvexHttpClient(convexUrl);
+
+	const asset = await convex.query(api.assets.get, { id: assetId as never });
+	if (!asset) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{ error: "Asset not found" },
+				{ status: 404 }
+			),
+		};
+	}
+
+	// Idempotency guard: if already processing, return the active job id
+	if (
+		!force &&
+		asset.processingStatus === "extraction_processing" &&
+		asset.extractionJobId
+	) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{
+					jobId: asset.extractionJobId,
+					status: "processing",
+					assetId,
+					sourceKey: asset.key,
+				},
+				{ status: 202 }
+			),
+		};
+	}
+
+	const ocrCompletedStatuses: string[] = [
+		"ocr_completed",
+		"extraction_queued",
+		"extraction_processing",
+		"extraction_completed",
+		"extraction_failed",
+	];
+
+	if (!ocrCompletedStatuses.includes(asset.processingStatus)) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{
+					error: `OCR not completed. Current status: ${asset.processingStatus}`,
+				},
+				{ status: 400 }
+			),
+		};
+	}
+
+	return {
+		kind: "start",
+		sourceKey: asset.key,
+		projectId: asset.projectId as string | undefined,
+		metadataOcrJobId: asset.ocrJobId as string | undefined,
+	};
+}
+
+async function resolveLegacyExtractionStart(
+	ocrJobId: string | undefined
+): Promise<StartResolution> {
+	if (!ocrJobId) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{ error: "ocrJobId is required" },
+				{ status: 400 }
+			),
+		};
+	}
+
+	const ocrJob = await getJob(ocrJobId);
+	if (!ocrJob) {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{ error: "OCR job not found" },
+				{ status: 404 }
+			),
+		};
+	}
+
+	if (ocrJob.status !== "completed") {
+		return {
+			kind: "response",
+			response: NextResponse.json(
+				{
+					error: "OCR job not completed",
+					status: ocrJob.status,
+				},
+				{ status: 400 }
+			),
+		};
+	}
+
+	return {
+		kind: "start",
+		sourceKey: ocrJob.sourceKey,
+		projectId: ocrJob.projectId,
+		metadataOcrJobId: ocrJobId,
+	};
+}
+
+interface PartialReextractPlan {
+	essayIndices: number[];
+}
+
+function buildBoundariesFromEssayResults(
+	essays: EssayExtractionResult[]
+): EssayBoundary[] {
+	return essays.map((essay) => ({
+		startPage: essay.startPage,
+		endPage: essay.endPage,
+		title: essay.essayTitle,
+		wordCount: essay.wordCount,
+	}));
+}
+
+function normalizeEssayResultItemsForIndex(
+	result: EssayExtractionResult,
+	essayIndex: number
+): EssayExtractionResult {
+	return {
+		...result,
+		items: result.items.map((item) => ({
+			...item,
+			essayIndex,
+		})),
+	};
+}
+
+function buildPartialPlan({
+	existingResults,
+	onlyMissingEssays,
+	explicitEssayIndices,
+}: {
+	existingResults: ExtractionJobResults;
+	onlyMissingEssays: boolean;
+	explicitEssayIndices: number[] | undefined;
+}): PartialReextractPlan {
+	const selected = new Set<number>();
+
+	if (onlyMissingEssays) {
+		for (let i = 0; i < existingResults.essays.length; i++) {
+			const essay = existingResults.essays[i];
+			const eligible = essay.items.length === 0 && essay.wordCount >= 100;
+			if (eligible) {
+				selected.add(i + 1);
+			}
+		}
+	}
+
+	for (const index of explicitEssayIndices ?? []) {
+		if (Number.isFinite(index)) {
+			selected.add(Math.trunc(index));
+		}
+	}
+
+	return { essayIndices: [...selected].sort((a, b) => a - b) };
+}
+
+async function loadExistingExtractionResultsForAsset(
+	assetId: string
+): Promise<{ resultsKey: string; results: ExtractionJobResults } | null> {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return null;
+	}
+
+	const { ConvexHttpClient } = await import("convex/browser");
+	const { api } = await import("@/convex/_generated/api");
+	const convex = new ConvexHttpClient(convexUrl);
+
+	const metadata = await convex.query(api.extractionResults.getByAsset, {
+		assetId: assetId as never,
+	});
+
+	if (!metadata?.resultsKey) {
+		return null;
+	}
+
+	try {
+		const { body } = await downloadFromR2(metadata.resultsKey);
+		const text = await streamToString(body);
+		const results = JSON.parse(text) as ExtractionJobResults;
+		return { resultsKey: metadata.resultsKey, results };
+	} catch (error) {
+		console.error(
+			`Failed to load existing extraction results for asset ${assetId}:`,
+			error
+		);
+		return null;
+	}
+}
+
+function selectBoundariesForPartialReextract({
+	stored,
+	existing,
+}: {
+	stored: EssayBoundary[] | null;
+	existing: ExtractionJobResults;
+}): EssayBoundary[] {
+	if (!stored || stored.length === 0) {
+		return buildBoundariesFromEssayResults(existing.essays);
+	}
+
+	if (stored.length !== existing.essays.length) {
+		return buildBoundariesFromEssayResults(existing.essays);
+	}
+
+	for (let i = 0; i < stored.length; i++) {
+		const boundary = stored[i];
+		const essay = existing.essays[i];
+		if (
+			boundary.startPage !== essay.startPage ||
+			boundary.endPage !== essay.endPage
+		) {
+			return buildBoundariesFromEssayResults(existing.essays);
+		}
+	}
+
+	return stored;
+}
+
+function buildPageNumbersForIndices(
+	boundaries: EssayBoundary[],
+	essayIndices: number[]
+): number[] {
+	const pages = new Set<number>();
+
+	for (const index of essayIndices) {
+		const boundary = boundaries[index - 1];
+		if (!boundary) {
+			continue;
+		}
+		for (let page = boundary.startPage; page <= boundary.endPage; page++) {
+			pages.add(page);
+		}
+	}
+
+	return [...pages].sort((a, b) => a - b);
+}
+
+async function processPartialAssetReextract({
+	jobId,
+	assetId,
+	sourceKey,
+	metadataOcrJobId,
+	parameters,
+	modelId,
+	onlyMissingEssays,
+	essayIndices,
+}: {
+	jobId: string;
+	assetId: string;
+	sourceKey: string;
+	metadataOcrJobId?: string;
+	parameters: ExtractionParameters;
+	modelId?: string;
+	onlyMissingEssays: boolean;
+	essayIndices: number[] | undefined;
+}): Promise<void> {
+	console.log(`[ExtractionJob ${jobId}] Starting partial re-extraction`, {
+		assetId,
+		onlyMissingEssays,
+		explicitEssayCount: essayIndices?.length ?? 0,
+	});
+
+	const existing = await loadExistingExtractionResultsForAsset(assetId);
+	if (!existing) {
+		throw new Error(
+			"No existing extraction results found for this asset. Run a full extraction first."
+		);
+	}
+
+	const storedBoundaries = await loadEssayBoundaries(assetId);
+	const boundaries = selectBoundariesForPartialReextract({
+		stored: storedBoundaries?.boundaries ?? null,
+		existing: existing.results,
+	});
+
+	const plan = buildPartialPlan({
+		existingResults: existing.results,
+		onlyMissingEssays,
+		explicitEssayIndices: essayIndices,
+	});
+
+	const validIndices = plan.essayIndices.filter(
+		(index) => index >= 1 && index <= boundaries.length
+	);
+
+	console.log(`[ExtractionJob ${jobId}] Partial re-extract plan`, {
+		selectedEssayCount: plan.essayIndices.length,
+		validEssayCount: validIndices.length,
+		totalEssays: boundaries.length,
+	});
+
+	if (validIndices.length === 0) {
+		const mergedEssays = existing.results.essays.map((essay, index) =>
+			normalizeEssayResultItemsForIndex(essay, index + 1)
+		);
+		const allItems = mergedEssays.flatMap((essay) => essay.items);
+		const stats = getExtractionStats(mergedEssays);
+
+		const fullResults: ExtractionJobResults = {
+			jobId,
+			ocrJobId: metadataOcrJobId,
+			assetId,
+			sourceKey,
+			totalEssays: mergedEssays.length,
+			essays: mergedEssays,
+			allItems,
+			stats,
+			parameters,
+			processedAt: new Date().toISOString(),
+		};
+
+		const resultsKey = `processing/${jobId}/extraction-results.json`;
+		await uploadToR2(
+			resultsKey,
+			Buffer.from(JSON.stringify(fullResults, null, 2)),
+			"application/json"
+		);
+
+		storeEssayBoundaries({
+			assetId,
+			totalPages:
+				storedBoundaries?.totalPages ??
+				boundaries.reduce(
+					(max, boundary) => Math.max(max, boundary.endPage),
+					1
+				),
+			sourceKey,
+			boundaries,
+		}).catch((error) => {
+			console.error(
+				`Failed to store essay boundaries for asset ${assetId}:`,
+				error
+			);
+		});
+
+		await completeJob(jobId);
+		await updateAssetAfterExtraction({
+			assetId,
+			jobId,
+			ocrJobId: metadataOcrJobId,
+			extractionResults: mergedEssays,
+			allItems,
+			stats,
+			resultsKey,
+		});
+		return;
+	}
+
+	await updateJobProgress(jobId, 0, validIndices.length);
+
+	const pageNumbers = buildPageNumbersForIndices(boundaries, validIndices);
+	console.log(
+		`[ExtractionJob ${jobId}] Loading OCR pages for partial re-extract`,
+		{
+			pageCount: pageNumbers.length,
+		}
+	);
+
+	const { getOcrResultsForPages } = await import("@/lib/storage/ocr-results");
+	const pageResults = await getOcrResultsForPages(assetId, pageNumbers);
+	const ocrPages = convertToLegacyOcrFormat(pageResults);
+
+	const essaysToExtract = validIndices.map((index) => {
+		const boundary = boundaries[index - 1];
+		return {
+			essayIndex: index,
+			text: getEssayText(ocrPages, boundary),
+			startPage: boundary.startPage,
+			endPage: boundary.endPage,
+			title: boundary.title,
+		};
+	});
+
+	const modelFactory = modelId
+		? () => getFreshModel("EXTRACTION", `partial-${jobId}`, modelId)
+		: undefined;
+
+	const extracted = await extractContentBatch(
+		essaysToExtract,
+		parameters,
+		sourceKey,
+		async (processed, total) => {
+			await updateJobProgress(jobId, processed, total);
+		},
+		undefined,
+		modelFactory
+	);
+
+	const mergedEssays: EssayExtractionResult[] = new Array(boundaries.length);
+	const extractedByIndex = new Map<number, EssayExtractionResult>();
+
+	for (let i = 0; i < extracted.length; i++) {
+		const { essayIndex } = essaysToExtract[i];
+		extractedByIndex.set(
+			essayIndex,
+			normalizeEssayResultItemsForIndex(extracted[i], essayIndex)
+		);
+	}
+
+	for (let i = 0; i < boundaries.length; i++) {
+		const index = i + 1;
+		const updated = extractedByIndex.get(index);
+		if (updated) {
+			mergedEssays[i] = updated;
+			continue;
+		}
+
+		const existingEssay = existing.results.essays[i];
+		mergedEssays[i] = existingEssay
+			? normalizeEssayResultItemsForIndex(existingEssay, index)
+			: {
+					essayTitle: boundaries[i].title,
+					startPage: boundaries[i].startPage,
+					endPage: boundaries[i].endPage,
+					items: [],
+					sections: [],
+					overallQuality: "low",
+					wordCount: boundaries[i].wordCount,
+				};
+	}
+
+	const allItems = mergedEssays.flatMap((essay) => essay.items);
+	const stats = getExtractionStats(mergedEssays);
+
+	const fullResults: ExtractionJobResults = {
+		jobId,
+		ocrJobId: metadataOcrJobId,
+		assetId,
+		sourceKey,
+		totalEssays: mergedEssays.length,
+		essays: mergedEssays,
+		allItems,
+		stats,
+		parameters,
+		processedAt: new Date().toISOString(),
+	};
+
+	const resultsKey = `processing/${jobId}/extraction-results.json`;
+	await uploadToR2(
+		resultsKey,
+		Buffer.from(JSON.stringify(fullResults, null, 2)),
+		"application/json"
+	);
+
+	storeEssayBoundaries({
+		assetId,
+		totalPages:
+			storedBoundaries?.totalPages ??
+			boundaries.reduce((max, boundary) => Math.max(max, boundary.endPage), 1),
+		sourceKey,
+		boundaries,
+	}).catch((error) => {
+		console.error(
+			`Failed to store essay boundaries for asset ${assetId}:`,
+			error
+		);
+	});
+
+	await completeJob(jobId);
+
+	await updateAssetAfterExtraction({
+		assetId,
+		jobId,
+		ocrJobId: metadataOcrJobId,
+		extractionResults: mergedEssays,
+		allItems,
+		stats,
+		resultsKey,
+	});
+}
+
+async function startExtractionInBackground({
+	jobId,
+	sourceKey,
+	loadAssetId,
+	loadOcrJobId,
+	metadataOcrJobId,
+	parameters,
+	assetId,
+	modelId,
+	onlyMissingEssays,
+	essayIndices,
+	recomputeBoundaries,
+}: {
+	jobId: string;
+	sourceKey: string;
+	loadAssetId?: string;
+	loadOcrJobId?: string;
+	metadataOcrJobId?: string;
+	parameters: ExtractionParameters;
+	assetId?: string;
+	modelId?: string;
+	onlyMissingEssays?: boolean;
+	essayIndices?: number[];
+	recomputeBoundaries?: boolean;
+}): Promise<void> {
+	const hasPartialRequest =
+		onlyMissingEssays === true || (essayIndices?.length ?? 0) > 0;
+
+	if (hasPartialRequest && assetId) {
+		await processPartialAssetReextract({
+			jobId,
+			assetId,
+			sourceKey,
+			metadataOcrJobId,
+			parameters,
+			modelId,
+			onlyMissingEssays: onlyMissingEssays === true,
+			essayIndices,
+		});
+		return;
+	}
+
+	const ocrData = await loadOcrResults(loadAssetId, loadOcrJobId);
+	if (!ocrData.success) {
+		const jobStatus = ocrData.jobStatus
+			? ` (status: ${ocrData.jobStatus})`
+			: "";
+		throw new Error(`Failed to load OCR results${jobStatus}: ${ocrData.error}`);
+	}
+
+	const storedBoundaries =
+		assetId && !recomputeBoundaries ? await loadEssayBoundaries(assetId) : null;
+	const boundariesOverride =
+		storedBoundaries &&
+		storedBoundaries.totalPages === ocrData.results.totalPages
+			? storedBoundaries.boundaries
+			: undefined;
+
+	await processExtractionJob(
+		jobId,
+		metadataOcrJobId,
+		ocrData.results,
+		parameters,
+		assetId,
+		modelId,
+		boundariesOverride
+	);
 }
 
 /**
@@ -544,7 +1252,8 @@ async function processLargePdfExtraction(
 	jobId: string,
 	ocrResults: OcrJobResults,
 	parameters: ExtractionParameters,
-	modelId?: string
+	modelId?: string,
+	boundariesOverride?: EssayBoundary[]
 ): Promise<ExtractionProcessResult> {
 	console.log(
 		`[ExtractionJob ${jobId}] Large PDF detected (${ocrResults.totalPages} pages), using chunked processing`
@@ -563,7 +1272,8 @@ async function processLargePdfExtraction(
 		async (_processedChunks, _totalChunks, currentEssay, totalEssays) => {
 			await updateJobProgress(jobId, currentEssay, totalEssays);
 		},
-		modelId
+		modelId,
+		boundariesOverride
 	);
 
 	await logChunkProcessingIssues(jobId, stats);
@@ -586,17 +1296,16 @@ async function processStandardExtraction(
 	jobId: string,
 	ocrResults: OcrJobResults,
 	parameters: ExtractionParameters,
-	modelId?: string
+	modelId?: string,
+	boundariesOverride?: EssayBoundary[]
 ): Promise<ExtractionProcessResult> {
 	console.log(
 		`[ExtractionJob ${jobId}] Standard processing for ${ocrResults.totalPages} pages`
 	);
 
-	const boundaries = await detectEssayBoundaries(
-		ocrResults.pages,
-		undefined,
-		modelId
-	);
+	const boundaries =
+		boundariesOverride ??
+		(await detectEssayBoundaries(ocrResults.pages, undefined, modelId));
 
 	const validation = validateBoundaries(boundaries, ocrResults.totalPages);
 	if (!validation.valid) {
@@ -673,7 +1382,7 @@ async function updateAssetAfterExtraction({
 }: {
 	assetId: string;
 	jobId: string;
-	ocrJobId: string;
+	ocrJobId?: string;
 	extractionResults: EssayExtractionResult[];
 	allItems: ExtractedContent[];
 	stats: ReturnType<typeof getExtractionStats>;
@@ -719,16 +1428,29 @@ async function updateAssetAfterExtraction({
  */
 async function processExtractionJob(
 	jobId: string,
-	ocrJobId: string,
+	ocrJobId: string | undefined,
 	ocrResults: OcrJobResults,
 	parameters: ExtractionParameters,
 	assetId?: string,
-	modelId?: string
+	modelId?: string,
+	boundariesOverride?: EssayBoundary[]
 ) {
 	const isLargePdf = ocrResults.totalPages > CHUNKED_PROCESSING_THRESHOLD;
 	const { extractionResults, processingStats } = isLargePdf
-		? await processLargePdfExtraction(jobId, ocrResults, parameters, modelId)
-		: await processStandardExtraction(jobId, ocrResults, parameters, modelId);
+		? await processLargePdfExtraction(
+				jobId,
+				ocrResults,
+				parameters,
+				modelId,
+				boundariesOverride
+			)
+		: await processStandardExtraction(
+				jobId,
+				ocrResults,
+				parameters,
+				modelId,
+				boundariesOverride
+			);
 
 	// Collect all items
 	const allItems = extractionResults.flatMap((r) => r.items);
@@ -765,6 +1487,25 @@ async function processExtractionJob(
 		Buffer.from(JSON.stringify(fullResults, null, 2)),
 		"application/json"
 	);
+
+	if (assetId) {
+		storeEssayBoundaries({
+			assetId,
+			totalPages: ocrResults.totalPages,
+			sourceKey: ocrResults.sourceKey,
+			boundaries: extractionResults.map((essay) => ({
+				startPage: essay.startPage,
+				endPage: essay.endPage,
+				title: essay.essayTitle,
+				wordCount: essay.wordCount,
+			})),
+		}).catch((error) => {
+			console.error(
+				`Failed to store essay boundaries for asset ${assetId}:`,
+				error
+			);
+		});
+	}
 
 	await completeJob(jobId);
 

@@ -178,6 +178,8 @@ export async function updateJobProgress(
 		throw new Error(`Job not found: ${jobId}`);
 	}
 
+	const wasPending = job.status === "pending";
+
 	job.processedItems = processedItems;
 	if (totalItems !== undefined) {
 		job.totalItems = totalItems;
@@ -196,7 +198,7 @@ export async function updateJobProgress(
 	}
 
 	activeJobsCache.set(jobId, job);
-	await persistJob(job, { bestEffort: true });
+	await persistJob(job, wasPending ? { force: true } : { bestEffort: true });
 }
 
 /**

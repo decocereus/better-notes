@@ -122,9 +122,22 @@ export interface StartOcrJobInput {
  * Input for starting an extraction job.
  */
 export interface StartExtractionJobInput {
-	ocrJobId: string;
+	/** Legacy OCR job id (optional when using assetId mode) */
+	ocrJobId?: string;
+	/** Asset id for per-page OCR results mode */
+	assetId?: string;
 	parametersId?: string; // ID of saved parameters, or use defaults
+	/** Optional: run-specific extraction parameters override */
+	parameters?: ExtractionParameters;
 	modelConfig?: Record<string, string>;
+	/** Optional: bypass idempotency guards */
+	force?: boolean;
+	/** Optional: re-extract only essays that produced 0 items last run (assetId mode only) */
+	onlyMissingEssays?: boolean;
+	/** Optional: re-extract only specific essay indices (1-based, assetId mode only) */
+	essayIndices?: number[];
+	/** Optional: recompute essay boundaries instead of reusing stored boundaries */
+	recomputeBoundaries?: boolean;
 }
 
 /**

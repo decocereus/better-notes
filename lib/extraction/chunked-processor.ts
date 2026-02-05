@@ -331,7 +331,8 @@ export async function processEssaysInChunks(
 		currentEssay: number,
 		totalEssays: number
 	) => void,
-	modelId?: string
+	modelId?: string,
+	boundariesOverride?: EssayBoundary[]
 ): Promise<{ results: EssayExtractionResult[]; stats: ProcessingStats }> {
 	const fullConfig = { ...DEFAULT_CONFIG, ...config };
 	const log = (message: string, ...args: unknown[]) => {
@@ -346,15 +347,23 @@ export async function processEssaysInChunks(
 		maxRetries: fullConfig.maxRetries,
 	});
 
-	// Step 1: Detect all essay boundaries
-	log("Step 1: Detecting essay boundaries...");
-	const boundaries = await detectEssayBoundaries(
-		ocrResults,
-		(processed, total) => {
-			log(`Boundary detection: ${processed}/${total} batches`);
-		},
-		modelId
-	);
+	// Step 1: Detect all essay boundaries (or reuse stored boundaries if provided)
+	let boundaries: EssayBoundary[];
+	if (boundariesOverride && boundariesOverride.length > 0) {
+		log(
+			`Step 1: Using stored essay boundaries (${boundariesOverride.length} essays)`
+		);
+		boundaries = boundariesOverride;
+	} else {
+		log("Step 1: Detecting essay boundaries...");
+		boundaries = await detectEssayBoundaries(
+			ocrResults,
+			(processed, total) => {
+				log(`Boundary detection: ${processed}/${total} batches`);
+			},
+			modelId
+		);
+	}
 
 	log(`Detected ${boundaries.length} essays`);
 

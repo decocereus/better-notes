@@ -103,16 +103,29 @@ export function useExtractionSse({
 	const [error, setError] = useState<string | null>(null);
 
 	const eventSourceRef = useRef<EventSource | null>(null);
-	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+	const callbacksRef = useRef({
+		onProgress,
+		onChunkComplete,
+		onEssayComplete,
+		onCompleted,
+		onError,
+	});
+
+	useEffect(() => {
+		callbacksRef.current = {
+			onProgress,
+			onChunkComplete,
+			onEssayComplete,
+			onCompleted,
+			onError,
+		};
+	}, [onProgress, onChunkComplete, onEssayComplete, onCompleted, onError]);
 
 	const disconnect = useCallback(() => {
 		if (eventSourceRef.current) {
 			eventSourceRef.current.close();
 			eventSourceRef.current = null;
-		}
-		if (reconnectTimeoutRef.current) {
-			clearTimeout(reconnectTimeoutRef.current);
-			reconnectTimeoutRef.current = null;
 		}
 		setIsConnected(false);
 	}, []);
@@ -129,7 +142,9 @@ export function useExtractionSse({
 		setError(null);
 		setIsCompleted(false);
 
-		const eventSource = new EventSource(`/api/extract/sse?jobId=${jobId}`);
+		const eventSource = new EventSource(
+			`/api/extract/sse?jobId=${encodeURIComponent(jobId)}`
+		);
 		eventSourceRef.current = eventSource;
 
 		eventSource.onopen = () => {
@@ -152,15 +167,18 @@ export function useExtractionSse({
 						if (data.message) {
 							setMessage(data.message);
 						}
-						onProgress?.(data.progress, data.message);
+						callbacksRef.current.onProgress?.(data.progress, data.message);
 						break;
 
 					case "chunk_complete":
-						onChunkComplete?.(data.chunkIndex, data.essaysProcessed);
+						callbacksRef.current.onChunkComplete?.(
+							data.chunkIndex,
+							data.essaysProcessed
+						);
 						break;
 
 					case "essay_complete":
-						onEssayComplete?.({
+						callbacksRef.current.onEssayComplete?.({
 							essayIndex: data.essayIndex,
 							essayTitle: data.essayTitle,
 							itemsExtracted: data.itemsExtracted,
@@ -173,14 +191,16 @@ export function useExtractionSse({
 						setProgress(100);
 						setIsConnected(false);
 						eventSource.close();
-						onCompleted?.();
+						eventSourceRef.current = null;
+						callbacksRef.current.onCompleted?.();
 						break;
 
 					case "error":
 						setError(data.message);
 						setIsConnected(false);
 						eventSource.close();
-						onError?.(data.message, data.code);
+						eventSourceRef.current = null;
+						callbacksRef.current.onError?.(data.message, data.code);
 						break;
 
 					case "ping":
@@ -199,24 +219,8 @@ export function useExtractionSse({
 		eventSource.onerror = (err) => {
 			console.error("SSE error:", err);
 			setIsConnected(false);
-
-			// Attempt to reconnect after a delay if job isn't completed
-			if (!isCompleted && jobId) {
-				reconnectTimeoutRef.current = setTimeout(() => {
-					eventSourceRef.current = null;
-					connect();
-				}, 5000);
-			}
 		};
-	}, [
-		jobId,
-		isCompleted,
-		onProgress,
-		onChunkComplete,
-		onEssayComplete,
-		onCompleted,
-		onError,
-	]);
+	}, [jobId]);
 
 	const reconnect = useCallback(() => {
 		disconnect();

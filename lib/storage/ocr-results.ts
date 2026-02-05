@@ -11,6 +11,8 @@ import {
 	uploadToR2,
 } from "./r2-client";
 
+const DEFAULT_OCR_RESULTS_READ_CONCURRENCY = 20;
+
 /**
  * Regex for matching OCR result files.
  */
@@ -55,6 +57,10 @@ async function readJsonFromR2<T>(key: string): Promise<T | null> {
 		return null;
 	}
 
+	return readJsonFromR2WithoutHead<T>(key);
+}
+
+async function readJsonFromR2WithoutHead<T>(key: string): Promise<T | null> {
 	const { body } = await downloadFromR2(key);
 	const chunks: Uint8Array[] = [];
 	const reader = body.getReader();
@@ -127,12 +133,94 @@ export async function getAllOcrResults(
 ): Promise<PageOcrResult[]> {
 	const resultsList = await listOcrResults(assetId);
 
-	const results = await Promise.all(
-		resultsList.map(async ({ pageNumber }) => {
-			const result = await getPageOcrResult(assetId, pageNumber);
-			return result;
-		})
+	const results: Array<PageOcrResult | null> = new Array(resultsList.length);
+	const concurrency = Math.min(
+		DEFAULT_OCR_RESULTS_READ_CONCURRENCY,
+		Math.max(1, resultsList.length)
 	);
+
+	let nextIndex = 0;
+	const workers = Array.from({ length: concurrency }, async () => {
+		while (true) {
+			const currentIndex = nextIndex;
+			nextIndex += 1;
+			if (currentIndex >= resultsList.length) {
+				return;
+			}
+
+			const { key, pageNumber } = resultsList[currentIndex];
+			try {
+				const parsed = await readJsonFromR2WithoutHead<PageOcrResult>(key);
+				if (parsed) {
+					results[currentIndex] =
+						typeof parsed.pageNumber === "number"
+							? parsed
+							: { ...parsed, pageNumber };
+				} else {
+					results[currentIndex] = null;
+				}
+			} catch {
+				results[currentIndex] = null;
+			}
+		}
+	});
+
+	await Promise.all(workers);
+
+	return results.filter((r): r is PageOcrResult => r !== null);
+}
+
+/**
+ * Reads a subset of OCR results for an asset by page number.
+ * Useful for partial re-extractions without downloading every page.
+ */
+export async function getOcrResultsForPages(
+	assetId: string,
+	pageNumbers: number[]
+): Promise<PageOcrResult[]> {
+	const uniquePages = Array.from(new Set(pageNumbers))
+		.filter((page) => Number.isFinite(page) && page >= 1)
+		.sort((a, b) => a - b);
+
+	if (uniquePages.length === 0) {
+		return [];
+	}
+
+	const results: Array<PageOcrResult | null> = new Array(uniquePages.length);
+	const concurrency = Math.min(
+		DEFAULT_OCR_RESULTS_READ_CONCURRENCY,
+		Math.max(1, uniquePages.length)
+	);
+
+	let nextIndex = 0;
+	const workers = Array.from({ length: concurrency }, async () => {
+		while (true) {
+			const currentIndex = nextIndex;
+			nextIndex += 1;
+			if (currentIndex >= uniquePages.length) {
+				return;
+			}
+
+			const pageNumber = uniquePages[currentIndex];
+			const key = getPageOcrResultKey(assetId, pageNumber);
+
+			try {
+				const parsed = await readJsonFromR2WithoutHead<PageOcrResult>(key);
+				if (parsed) {
+					results[currentIndex] =
+						typeof parsed.pageNumber === "number"
+							? parsed
+							: { ...parsed, pageNumber };
+				} else {
+					results[currentIndex] = null;
+				}
+			} catch {
+				results[currentIndex] = null;
+			}
+		}
+	});
+
+	await Promise.all(workers);
 
 	return results.filter((r): r is PageOcrResult => r !== null);
 }
