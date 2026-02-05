@@ -781,3 +781,24 @@ const response = await genai.models.generateContent({
 });
 ```
 **Lesson:** `@ai-sdk/google` only supports Buffer data for files - it cannot reference Google File API URIs. For large files uploaded via File API, use `@google/genai` directly with `createPartFromUri(uri, mimeType)` to reference the uploaded file.
+
+## 2026-02-06: Project Page Overhaul Learnings
+
+### Convex Patterns
+- Use `as never` for string-to-Convex-Id casts (TypeScript workaround)
+- Convex filenames MUST be camelCase — kebab-case throws errors
+- `useQuery` with `"skip"` sentinel avoids conditional hook calls
+- `ConvexHttpClient` is needed for server-side writes in API routes
+- Compound indexes (`by_mini_theme: ["projectId", "miniThemeId"]`) enable efficient lookups
+
+### React Patterns
+- `useRef` for previous-value tracking enables toast notifications on Convex subscription transitions
+- Extract complex logic into standalone functions outside components to stay under Biome's cognitive complexity limit of 15
+- Extracting sub-components (like ContentSourcesCard) is another effective way to reduce cognitive complexity
+- `useMemo` with `"skip"` sentinel in Convex queries avoids unnecessary fetches
+
+### Architecture Decisions
+- Convex real-time subscriptions replace localStorage polling — more reliable, survives refresh
+- Pipeline stepper derives all state from Convex queries — single source of truth
+- Export utilities are pure functions, easy to test independently
+- "From Library" tab uses `useMemo` to compute available assets = all completed minus already assigned

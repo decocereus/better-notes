@@ -8,7 +8,36 @@ Track completed work, current status, and next steps.
 **Local Converter Integration** ✅ Implemented (validation pending)
 **E2E Validation Gaps:** Local converter wiring check, sample PDF run, integration tests, backfills (see `docs/e2e_todos.md`)
 **Build Status:** ✅ Passing (`bun run build`)
-**Tests:** ✅ 157 passing (`bun run test`)
+**Tests:** ✅ 172 passing (`bun run test`)
+
+---
+
+## 2026-02-06: Project Page Overhaul
+
+### Sprint A: Data Persistence Layer (completed)
+- Added 3 new Convex tables: `classificationJobs`, `comparisonResults`, `generatedNotes`
+- Created CRUD functions for each table with proper indexes
+- Wired `/api/classify`, `/api/compare`, `/api/generate` routes to persist results to Convex on completion
+- Updated `project-workflow.tsx` to load persisted state from Convex instead of localStorage
+
+### Sprint B: Project Page UX (completed)
+- Created `PipelineStepper` component — horizontal progress indicator for 5 pipeline stages
+- Integrated stepper into project detail page with scroll-to-section navigation
+- Created `EditProjectDialog` and enabled the previously disabled Edit button
+- Added search input to projects list page with client-side filtering
+- Added `sonner` toast notifications for classification/comparison completions
+
+### Sprint C: Features (completed)
+- Added "Process All" bulk processing button for pending/failed sources
+- Created export utilities (`lib/utils/export.ts`) and `ExportMenu` component
+- Added "From Library" tab to add source dialog for asset reuse across projects
+- Added toast notifications to retry failed items flow
+
+### Sprint D: Testing & Polish (completed)
+- All lint/typecheck passes with 0 errors
+- Component tests for PipelineStepper, ExportMenu
+- Unit tests for export utilities
+- No Convex function tests (no convex-test infrastructure — noted as tech debt)
 
 ---
 
@@ -1305,3 +1334,4 @@ Track known issues that need addressing:
 
 - Pre-existing lint issues in example files (component-example.tsx, some shadcn components)
 - These are template files that should be reviewed/removed before production
+- No Convex function tests — `convex-test` package not installed; server-side Convex functions have no automated test coverage
