@@ -107,4 +107,71 @@ export default defineSchema({
 		resultsKey: v.string(), // R2 key for full results JSON
 		createdAt: v.string(),
 	}).index("by_asset", ["assetId"]),
+
+	classificationJobs: defineTable({
+		projectId: v.id("projects"),
+		themePageId: v.id("themePages"),
+		jobId: v.string(),
+		status: v.union(
+			v.literal("pending"),
+			v.literal("processing"),
+			v.literal("completed"),
+			v.literal("failed")
+		),
+		progress: v.number(),
+		totalItems: v.number(),
+		classifiedItems: v.number(),
+		resultsKey: v.string(),
+		stats: v.optional(
+			v.object({
+				classified: v.number(),
+				unclassified: v.number(),
+				multiTheme: v.number(),
+				themesWithContent: v.number(),
+			})
+		),
+		error: v.optional(v.string()),
+		createdAt: v.string(),
+		completedAt: v.optional(v.string()),
+	})
+		.index("by_project", ["projectId"])
+		.index("by_job_id", ["jobId"]),
+
+	comparisonResults: defineTable({
+		projectId: v.id("projects"),
+		themePageId: v.id("themePages"),
+		miniThemeId: v.string(),
+		mainThemeId: v.string(),
+		score: v.number(),
+		jobId: v.string(),
+		resultsKey: v.string(),
+		status: v.union(
+			v.literal("pending"),
+			v.literal("completed"),
+			v.literal("failed")
+		),
+		error: v.optional(v.string()),
+		createdAt: v.string(),
+	})
+		.index("by_project", ["projectId"])
+		.index("by_mini_theme", ["projectId", "miniThemeId"]),
+
+	generatedNotes: defineTable({
+		projectId: v.id("projects"),
+		miniThemeId: v.string(),
+		mainThemeId: v.string(),
+		mainThemeTitle: v.string(),
+		miniThemeTitle: v.string(),
+		resultsKey: v.string(),
+		syncStatus: v.union(
+			v.literal("not_synced"),
+			v.literal("synced"),
+			v.literal("failed")
+		),
+		notionPageId: v.optional(v.string()),
+		createdAt: v.string(),
+		updatedAt: v.string(),
+	})
+		.index("by_project", ["projectId"])
+		.index("by_mini_theme", ["projectId", "miniThemeId"]),
 });
