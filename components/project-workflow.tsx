@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "convex/react";
 import {
 	AlertCircle,
 	BarChart3,
@@ -25,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { api } from "@/convex/_generated/api";
 import { aggregateContentByTheme } from "@/lib/classification/aggregator";
 import { useSettings } from "@/lib/hooks/use-settings";
 import type { Asset } from "@/types/asset";
@@ -277,6 +279,21 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		themes,
 	} = props;
 	const { settings } = useSettings();
+
+	// Load persisted pipeline state from Convex
+	const latestClassification = useQuery(
+		api.classificationJobs.getLatestByProject,
+		projectIdValue ? { projectId: projectIdValue as never } : "skip"
+	);
+	const persistedComparisons = useQuery(
+		api.comparisonResults.listByProject,
+		projectIdValue ? { projectId: projectIdValue as never } : "skip"
+	);
+	const _persistedNotes = useQuery(
+		api.generatedNotes.listByProject,
+		projectIdValue ? { projectId: projectIdValue as never } : "skip"
+	);
+
 	// Get assets by processing status
 	const completedAssets = assets.filter(
 		(a) => a.processingStatus === "extraction_completed"
@@ -426,25 +443,51 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		}
 	}, []);
 
-	// Check for existing classification on mount
+	// Initialize classification state from Convex
 	useEffect(() => {
-		if (hasExtractedContent && classification.status === "idle") {
-			const checkExisting = async () => {
-				const savedJobId = localStorage.getItem(
-					`classification-job-${projectIdValue}`
-				);
-				if (savedJobId) {
-					await pollClassificationStatus(savedJobId);
-				}
-			};
-			checkExisting();
+		if (latestClassification && latestClassification.status === "completed") {
+			setClassification((prev) => ({
+				...prev,
+				jobId: latestClassification.jobId,
+				status: "completed",
+				progress: 100,
+				totalItems: latestClassification.totalItems,
+				processedItems: latestClassification.classifiedItems,
+			}));
 		}
-	}, [
-		hasExtractedContent,
-		classification.status,
-		pollClassificationStatus,
-		projectIdValue,
-	]);
+	}, [latestClassification]);
+
+	// Initialize comparison scores from Convex
+	useEffect(() => {
+		if (persistedComparisons && persistedComparisons.length > 0) {
+			setComparisons((prev) => {
+				const next = { ...prev };
+				for (const comp of persistedComparisons) {
+					if (comp.status === "completed") {
+						next[comp.miniThemeId] = {
+							...next[comp.miniThemeId],
+							status: "completed",
+							score: comp.score,
+							jobId: comp.jobId,
+						} as ComparisonState[string];
+					}
+				}
+				return next;
+			});
+		}
+	}, [persistedComparisons]);
+
+	// Resume polling for in-progress classification from Convex
+	useEffect(() => {
+		if (
+			latestClassification &&
+			(latestClassification.status === "pending" ||
+				latestClassification.status === "processing") &&
+			classification.status === "idle"
+		) {
+			pollClassificationStatus(latestClassification.jobId);
+		}
+	}, [latestClassification, classification.status, pollClassificationStatus]);
 
 	const startClassification = async () => {
 		if (!hasExtractedContent || hasInFlightSources) {
@@ -479,7 +522,6 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 			}
 
 			const data = await response.json();
-			localStorage.setItem(`classification-job-${projectIdValue}`, data.jobId);
 			pollClassificationStatus(data.jobId);
 		} catch (_error) {
 			setClassification((prev) => ({
