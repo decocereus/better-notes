@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Toaster } from "sonner";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import "./globals.css";
@@ -23,6 +24,7 @@ export default function RootLayout({
 				<ConvexClientProvider>
 					<AppShell>{children}</AppShell>
 				</ConvexClientProvider>
+				<Toaster position="bottom-right" richColors />
 			</body>
 		</html>
 	);

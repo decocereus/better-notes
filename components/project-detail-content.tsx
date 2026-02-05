@@ -15,9 +15,23 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import {
+	type Dispatch,
+	type SetStateAction,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { toast } from "sonner";
 import { AddSourceDialog } from "@/components/add-source-dialog";
 import { AddThemePageDialog } from "@/components/add-theme-page-dialog";
+import { EditProjectDialog } from "@/components/edit-project-dialog";
+import {
+	type PipelineStep,
+	PipelineStepper,
+	type StepStatus,
+} from "@/components/pipeline-stepper";
 import { ProjectWorkflow } from "@/components/project-workflow";
 import { SourceList } from "@/components/source-list";
 import {
@@ -84,6 +98,52 @@ type UpdateProjectMutation = (args: {
 
 interface RouterHandle {
 	push: (href: string) => void;
+}
+
+// Pipeline step status derivation helpers (extracted to reduce cognitive complexity)
+function deriveSourceStatus(
+	totalSources: number,
+	processingSources: number,
+	completedSources: number
+): StepStatus {
+	if (totalSources === 0) {
+		return "pending";
+	}
+	if (processingSources > 0) {
+		return "active";
+	}
+	if (completedSources === totalSources) {
+		return "completed";
+	}
+	return "pending";
+}
+
+function deriveExtractionStatus(
+	extractionComplete: boolean,
+	extractionProcessing: boolean
+): StepStatus {
+	if (extractionComplete) {
+		return "completed";
+	}
+	if (extractionProcessing) {
+		return "active";
+	}
+	return "pending";
+}
+
+function deriveClassificationStatus(
+	classStatus: string | undefined
+): StepStatus {
+	if (classStatus === "completed") {
+		return "completed";
+	}
+	if (classStatus === "processing") {
+		return "active";
+	}
+	if (classStatus === "failed") {
+		return "failed";
+	}
+	return "pending";
 }
 
 async function deleteProjectSource({
@@ -233,6 +293,20 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 		projectId ? { projectId: projectId as Id<"projects"> } : "skip"
 	);
 
+	// Pipeline data queries
+	const latestClassification = useQuery(
+		api.classificationJobs.getLatestByProject,
+		project ? { projectId: project.id as never } : "skip"
+	);
+	const comparisonResults = useQuery(
+		api.comparisonResults.listByProject,
+		project ? { projectId: project.id as never } : "skip"
+	);
+	const generatedNotes = useQuery(
+		api.generatedNotes.listByProject,
+		project ? { projectId: project.id as never } : "skip"
+	);
+
 	const removeProject = useMutation(api.projects.remove);
 	const removeSource = useMutation(api.projects.removeSource);
 	const updateProject = useMutation(api.projects.update);
@@ -244,6 +318,123 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [showAddThemePage, setShowAddThemePage] = useState(false);
 	const [isUpdatingTheme, setIsUpdatingTheme] = useState(false);
+	const [showEditProject, setShowEditProject] = useState(false);
+
+	// Pipeline stepper data
+	const pipelineSteps = useMemo((): PipelineStep[] => {
+		const sources = project?.sources ?? [];
+		const completedSources = sources.filter(
+			(s) => s.status === "completed"
+		).length;
+		const processingSources = sources.filter(
+			(s) => s.status === "processing"
+		).length;
+		const totalSources = sources.length;
+
+		const projectAssetsList = (assets ?? []) as Asset[];
+		const extractionComplete = projectAssetsList.some(
+			(a) => a.processingStatus === "extraction_completed"
+		);
+		const extractionProcessing = projectAssetsList.some(
+			(a) =>
+				a.processingStatus === "extraction_processing" ||
+				a.processingStatus === "ocr_processing"
+		);
+
+		const classStatus = latestClassification?.status;
+		const compCount = (comparisonResults ?? []).filter(
+			(c) => c.status === "completed"
+		).length;
+		const noteCount = (generatedNotes ?? []).length;
+
+		return [
+			{
+				id: "sources",
+				label: "Sources",
+				status: deriveSourceStatus(
+					totalSources,
+					processingSources,
+					completedSources
+				),
+				count: totalSources,
+			},
+			{
+				id: "extraction",
+				label: "Extraction",
+				status: deriveExtractionStatus(
+					extractionComplete,
+					extractionProcessing
+				),
+			},
+			{
+				id: "classification",
+				label: "Classification",
+				status: deriveClassificationStatus(classStatus),
+			},
+			{
+				id: "comparison",
+				label: "Comparison",
+				status: compCount > 0 ? "completed" : "pending",
+				count: compCount,
+			},
+			{
+				id: "notes",
+				label: "Notes",
+				status: noteCount > 0 ? "completed" : "pending",
+				count: noteCount,
+			},
+		];
+	}, [
+		project,
+		assets,
+		latestClassification,
+		comparisonResults,
+		generatedNotes,
+	]);
+
+	// Toast notifications for status transitions
+	const prevClassStatusRef = useRef(latestClassification?.status);
+
+	useEffect(() => {
+		const prevStatus = prevClassStatusRef.current;
+		const newStatus = latestClassification?.status;
+		prevClassStatusRef.current = newStatus;
+
+		if (!(prevStatus && newStatus) || prevStatus === newStatus) {
+			return;
+		}
+
+		if (newStatus === "completed") {
+			toast.success("Classification complete", {
+				description: `${latestClassification?.classifiedItems ?? 0} items classified`,
+			});
+		} else if (newStatus === "failed") {
+			toast.error("Classification failed", {
+				description: latestClassification?.error ?? "Unknown error",
+			});
+		}
+	}, [latestClassification]);
+
+	const prevCompCountRef = useRef(0);
+
+	useEffect(() => {
+		const newCount = (comparisonResults ?? []).filter(
+			(c) => c.status === "completed"
+		).length;
+		if (newCount > prevCompCountRef.current && prevCompCountRef.current > 0) {
+			toast.success("Comparison complete", {
+				description: `${newCount} themes compared`,
+			});
+		}
+		prevCompCountRef.current = newCount;
+	}, [comparisonResults]);
+
+	function handleStepClick(stepId: string) {
+		const element = document.getElementById(`section-${stepId}`);
+		if (element) {
+			element.scrollIntoView({ behavior: "smooth" });
+		}
+	}
 
 	const handleDeleteSource = () => {
 		deleteProjectSource({
@@ -362,7 +553,7 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
-							<DropdownMenuItem disabled>
+							<DropdownMenuItem onClick={() => setShowEditProject(true)}>
 								<Pencil className="size-4" />
 								Edit Project
 							</DropdownMenuItem>
@@ -378,6 +569,11 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 					</DropdownMenu>
 				</div>
 			</div>
+
+			{/* Pipeline Stepper */}
+			{project.themePageId && (
+				<PipelineStepper onStepClick={handleStepClick} steps={pipelineSteps} />
+			)}
 
 			{/* Error State */}
 			{error && (
@@ -399,7 +595,7 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			<ThemePageInfoCard themePage={themePage} />
 
 			{/* Content Sources Section */}
-			<Card className="p-6">
+			<Card className="p-6" id="section-sources">
 				<h3 className="mb-4 font-medium text-lg">Content Sources</h3>
 
 				{project.sources.length === 0 ? (
@@ -442,12 +638,20 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 
 			{/* Workflow Section: Classification, Comparison, Notes */}
 			{themePage && (
-				<WorkflowSection
-					assets={assets}
-					projectId={projectId}
-					sources={project.sources as ContentSource[]}
-					themePage={themePage}
-				/>
+				<div id="section-extraction">
+					<div id="section-classification">
+						<div id="section-comparison">
+							<div id="section-notes">
+								<WorkflowSection
+									assets={assets}
+									projectId={projectId}
+									sources={project.sources as ContentSource[]}
+									themePage={themePage}
+								/>
+							</div>
+						</div>
+					</div>
+				</div>
 			)}
 
 			{/* Delete Source Confirmation */}
@@ -508,6 +712,18 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 				onOpenChange={setShowAddThemePage}
 				onThemePageAdded={handleThemePageAdded}
 				open={showAddThemePage}
+			/>
+
+			{/* Edit Project Dialog */}
+			<EditProjectDialog
+				onOpenChange={setShowEditProject}
+				open={showEditProject}
+				project={{
+					id: project.id,
+					name: project.name,
+					description: project.description,
+					themePageId: project.themePageId,
+				}}
 			/>
 		</div>
 	);

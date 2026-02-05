@@ -1,10 +1,10 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { Plus } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -32,6 +33,7 @@ export function ProjectsContent() {
 	const [deleteId, setDeleteId] = useState<string | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [searchQuery, setSearchQuery] = useState("");
 	const [patternsSummary, setPatternsSummary] = useState<{
 		totalItems: number;
 		totalEssays: number;
@@ -39,6 +41,18 @@ export function ProjectsContent() {
 		lastUpdatedAt?: string | null;
 	} | null>(null);
 	const [patternsError, setPatternsError] = useState<string | null>(null);
+
+	const filteredProjects = useMemo(() => {
+		if (!(projects && searchQuery.trim())) {
+			return projects;
+		}
+		const query = searchQuery.toLowerCase();
+		return projects.filter(
+			(p) =>
+				p.name.toLowerCase().includes(query) ||
+				p.description?.toLowerCase().includes(query)
+		);
+	}, [projects, searchQuery]);
 
 	const handleProjectCreated = (projectId: string) => {
 		router.push(`/projects/${projectId}`);
@@ -210,6 +224,19 @@ export function ProjectsContent() {
 				) : null}
 			</Card>
 
+			{/* Search */}
+			{projects.length > 0 && (
+				<div className="relative">
+					<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						className="pl-9"
+						onChange={(e) => setSearchQuery(e.target.value)}
+						placeholder="Search projects..."
+						value={searchQuery}
+					/>
+				</div>
+			)}
+
 			{/* Projects List or Empty State */}
 			{projects.length === 0 ? (
 				<Card className="flex flex-col items-center justify-center p-12 text-center">
@@ -233,7 +260,7 @@ export function ProjectsContent() {
 				</Card>
 			) : (
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{projects.map((project) => (
+					{(filteredProjects ?? []).map((project) => (
 						<ProjectCard
 							key={project.id}
 							onDelete={handleDeleteRequest}
