@@ -1,8 +1,11 @@
+import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
+import { api } from "@/convex/_generated/api";
 import { filterBySource } from "@/lib/comparison/gap-analyzer";
 import { enforceNoteConciseness } from "@/lib/generation/conciseness";
 import { generateNotesForTheme } from "@/lib/generation/note-generator";
 import { getModelForTask } from "@/lib/llm/provider";
+import { uploadToR2 } from "@/lib/storage";
 import type { ExtractedContent } from "@/types/extraction";
 import type { GeneratedNote, GenerationConfig } from "@/types/generation";
 import { DEFAULT_GENERATION_CONFIG } from "@/types/generation";
@@ -29,6 +32,38 @@ interface GenerateResponse {
 	success: boolean;
 	note?: GeneratedNote;
 	error?: string;
+}
+
+/**
+ * Persists generated note to R2 and Convex for project-scoped notes.
+ */
+async function persistNoteToConvex(
+	note: GeneratedNote,
+	projectId: string,
+	mainTheme: MainTheme,
+	miniTheme: MiniTheme
+): Promise<void> {
+	const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!convexUrl) {
+		return;
+	}
+
+	const convex = new ConvexHttpClient(convexUrl);
+	const resultsKey = `projects/${projectId}/notes/${miniTheme.id}.json`;
+	await uploadToR2(
+		resultsKey,
+		Buffer.from(JSON.stringify(note)),
+		"application/json"
+	);
+	await convex.mutation(api.generatedNotes.upsert, {
+		projectId: projectId as never,
+		miniThemeId: miniTheme.id,
+		mainThemeId: mainTheme.id,
+		mainThemeTitle: mainTheme.title,
+		miniThemeTitle: miniTheme.title,
+		resultsKey,
+		syncStatus: "not_synced" as const,
+	});
 }
 
 /**
@@ -122,6 +157,15 @@ export async function POST(
 
 		if (projectId) {
 			note = { ...note, projectId };
+		}
+
+		// Persist generated note to R2 and Convex
+		if (projectId) {
+			try {
+				await persistNoteToConvex(note, projectId, mainTheme, miniTheme);
+			} catch (convexError) {
+				console.warn("[Generate] Failed to persist to Convex:", convexError);
+			}
 		}
 
 		return NextResponse.json({ success: true, note });

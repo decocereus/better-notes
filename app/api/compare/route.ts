@@ -7,7 +7,9 @@
  * GET: Get comparison results
  */
 
+import { ConvexHttpClient } from "convex/browser";
 import { type NextRequest, NextResponse } from "next/server";
+import { api } from "@/convex/_generated/api";
 import { validateAIConfig } from "@/lib/ai";
 import {
 	analyzeGaps,
@@ -71,6 +73,19 @@ interface ComparisonJobResults {
 interface ClassificationJobResults {
 	themes: MainTheme[];
 	classifiedContent: ExtractedContent[];
+	themePageId?: string;
+	projectId?: string;
+}
+
+/**
+ * Gets the Convex HTTP client.
+ */
+function getConvexClient(): ConvexHttpClient {
+	const url = process.env.NEXT_PUBLIC_CONVEX_URL;
+	if (!url) {
+		throw new Error("NEXT_PUBLIC_CONVEX_URL environment variable not set");
+	}
+	return new ConvexHttpClient(url);
 }
 
 /**
@@ -304,7 +319,8 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const { themes, classifiedContent } = classificationResult.data;
+		const { themes, classifiedContent, themePageId, projectId } =
+			classificationResult.data;
 
 		// Find theme info
 		const { mainTheme, miniTheme } = findThemeInfo(
@@ -347,10 +363,11 @@ export async function POST(request: NextRequest) {
 		);
 
 		// Create the comparison job
+		const resolvedProjectId = projectId ?? classificationJob.projectId;
 		const job = await createJob(
 			"comparison",
 			classificationJob.sourceKey,
-			classificationJob.projectId,
+			resolvedProjectId,
 			3 // 3 steps: gap analysis, suggestions, readiness
 		);
 
@@ -364,10 +381,37 @@ export async function POST(request: NextRequest) {
 			topperContent,
 			mainTheme,
 			miniTheme,
+			resolvedProjectId,
+			themePageId,
 			modelId
-		).catch((error) => {
+		).catch(async (error) => {
 			console.error(`Comparison job ${job.id} failed:`, error);
-			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			failJob(job.id, errorMessage);
+
+			// Persist failure to Convex
+			if (resolvedProjectId && themePageId) {
+				try {
+					const convex = getConvexClient();
+					await convex.mutation(api.comparisonResults.upsert, {
+						projectId: resolvedProjectId as never,
+						themePageId: themePageId as never,
+						miniThemeId: miniTheme.id,
+						mainThemeId: mainTheme.id,
+						score: 0,
+						jobId: job.id,
+						resultsKey: "",
+						status: "failed" as const,
+						error: errorMessage,
+					});
+				} catch (convexError) {
+					console.warn(
+						"[Compare] Failed to persist failure to Convex:",
+						convexError
+					);
+				}
+			}
 		});
 
 		return NextResponse.json(
@@ -474,6 +518,8 @@ async function processComparisonJob(
 	topperContent: ExtractedContent[],
 	mainTheme: MainTheme,
 	miniTheme: MiniTheme,
+	projectId?: string,
+	themePageId?: string,
 	modelId?: string
 ) {
 	// Step 1: Analyze gaps
@@ -543,6 +589,25 @@ async function processComparisonJob(
 
 	await updateJobProgress(jobId, 3, 3);
 	await completeJob(jobId);
+
+	// Persist comparison results to Convex
+	if (projectId && themePageId) {
+		try {
+			const convex = getConvexClient();
+			await convex.mutation(api.comparisonResults.upsert, {
+				projectId: projectId as never,
+				themePageId: themePageId as never,
+				miniThemeId: miniTheme.id,
+				mainThemeId: mainTheme.id,
+				score: readinessAssessment.overallScore,
+				jobId,
+				resultsKey: `processing/${jobId}/comparison-results.json`,
+				status: "completed" as const,
+			});
+		} catch (convexError) {
+			console.warn("[Compare] Failed to persist to Convex:", convexError);
+		}
+	}
 }
 
 /**

@@ -9,7 +9,10 @@
  */
 
 import type * as assets from "../assets.js";
+import type * as classificationJobs from "../classificationJobs.js";
+import type * as comparisonResults from "../comparisonResults.js";
 import type * as extractionResults from "../extractionResults.js";
+import type * as generatedNotes from "../generatedNotes.js";
 import type * as projects from "../projects.js";
 import type * as settings from "../settings.js";
 import type * as themePages from "../themePages.js";
@@ -22,7 +25,10 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   assets: typeof assets;
+  classificationJobs: typeof classificationJobs;
+  comparisonResults: typeof comparisonResults;
   extractionResults: typeof extractionResults;
+  generatedNotes: typeof generatedNotes;
   projects: typeof projects;
   settings: typeof settings;
   themePages: typeof themePages;

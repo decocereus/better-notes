@@ -677,9 +677,34 @@ export async function POST(request: NextRequest) {
 			themes,
 			resolvedProjectId,
 			modelId
-		).catch((error) => {
+		).catch(async (error) => {
 			console.error(`Classification job ${job.id} failed:`, error);
-			failJob(job.id, error instanceof Error ? error.message : "Unknown error");
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			failJob(job.id, errorMessage);
+
+			// Persist failure to Convex
+			if (resolvedProjectId) {
+				try {
+					const convex = getConvexClient();
+					await convex.mutation(api.classificationJobs.upsert, {
+						projectId: resolvedProjectId as never,
+						themePageId: themePageId as never,
+						jobId: job.id,
+						status: "failed" as const,
+						progress: 0,
+						totalItems: 0,
+						classifiedItems: 0,
+						resultsKey: "",
+						error: errorMessage,
+					});
+				} catch (convexError) {
+					console.warn(
+						"[Classify] Failed to persist failure to Convex:",
+						convexError
+					);
+				}
+			}
 		});
 
 		return NextResponse.json(
@@ -835,6 +860,36 @@ async function processClassificationJob(
 	);
 
 	await completeJob(jobId);
+
+	// Persist classification job results to Convex
+	if (projectId) {
+		try {
+			const convex = getConvexClient();
+			await convex.mutation(api.classificationJobs.upsert, {
+				projectId: projectId as never,
+				themePageId: themePageId as never,
+				jobId,
+				status: "completed" as const,
+				progress: 100,
+				totalItems: content.length,
+				classifiedItems: classificationStats.totalClassified,
+				resultsKey: `processing/${jobId}/classification-results.json`,
+				stats: {
+					classified: classificationStats.totalClassified,
+					unclassified: classificationStats.unclassified,
+					multiTheme: classificationStats.multiThemeCount,
+					themesWithContent: themes.filter((t) =>
+						contentWithMultiUse.some((c) =>
+							c.themes.some((tm) => tm.mainThemeId === t.id)
+						)
+					).length,
+				},
+				completedAt: new Date().toISOString(),
+			});
+		} catch (convexError) {
+			console.warn("[Classify] Failed to persist to Convex:", convexError);
+		}
+	}
 }
 
 /**
