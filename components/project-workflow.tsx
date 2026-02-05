@@ -18,9 +18,11 @@ import {
 	Tag,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { ClassificationReview } from "@/components/classification-review";
 import { ComparisonResults } from "@/components/comparison-results";
+import { ExportMenu } from "@/components/export-menu";
 import { NoteGenerationPanel } from "@/components/note-generation-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,10 @@ import type {
 import type { GeneratedNote } from "@/types/generation";
 import type { ContentSource } from "@/types/project";
 import type { MainTheme, MiniTheme } from "@/types/theme";
+
+function formatComparisonAsMarkdown(results: ThemeComparisonResult): string {
+	return `# Comparison Results\n\n\`\`\`json\n${JSON.stringify(results, null, 2)}\n\`\`\``;
+}
 
 // ============================================================================
 // TYPES
@@ -260,7 +266,12 @@ async function retryFailedItems({
 
 		if (failedCount > 0) {
 			setRetryError(`Failed to retry ${failedCount} item(s).`);
+			toast.warning(`${failedCount} item(s) failed to retry`);
+		} else {
+			toast.success("All failed items retried successfully");
 		}
+	} catch {
+		toast.error("Retry failed");
 	} finally {
 		setIsRetryingFailed(false);
 	}
@@ -1327,6 +1338,11 @@ function ThemeActions({
 							Comparison: {mainTheme.title} &gt; {miniTheme.title}
 						</h4>
 						<div className="flex gap-2">
+							<ExportMenu
+								filename={`comparison-${miniTheme.id}`}
+								jsonData={comparison}
+								markdown={formatComparisonAsMarkdown(comparison)}
+							/>
 							<Button onClick={onRecompare} size="sm" variant="outline">
 								<RefreshCw className="mr-2 size-4" />
 								Re-run

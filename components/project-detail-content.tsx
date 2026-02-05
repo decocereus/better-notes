@@ -7,8 +7,10 @@ import {
 	BookOpen,
 	FileText,
 	Link as LinkIcon,
+	Loader2,
 	MoreVertical,
 	Pencil,
+	Play,
 	Plus,
 	Sparkles,
 	Trash2,
@@ -270,6 +272,61 @@ async function updateThemePageSelection({
 	});
 }
 
+async function bulkProcessSources({
+	project,
+	setIsBulkProcessing,
+}: {
+	project: Project;
+	setIsBulkProcessing: Dispatch<SetStateAction<boolean>>;
+}): Promise<void> {
+	const pendingSources = project.sources.filter(
+		(s) => s.status === "pending" || s.status === "failed"
+	);
+	if (pendingSources.length === 0) {
+		return;
+	}
+
+	setIsBulkProcessing(true);
+
+	try {
+		const results = await Promise.allSettled(
+			pendingSources.map(async (source) => {
+				const res = await fetch("/api/sources/process", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						sourceId: source.id,
+						projectId: project.id,
+						reference: source.reference,
+						type: source.type,
+					}),
+				});
+				if (!res.ok) {
+					throw new Error(`Failed to process ${source.name}`);
+				}
+			})
+		);
+
+		const successCount = results.filter((r) => r.status === "fulfilled").length;
+		const failCount = results.filter((r) => r.status === "rejected").length;
+
+		if (failCount > 0) {
+			toast.warning(
+				`Processed ${successCount}/${pendingSources.length} sources`,
+				{
+					description: `${failCount} failed to start`,
+				}
+			);
+		} else {
+			toast.success(`Processing ${successCount} sources`);
+		}
+	} catch {
+		toast.error("Bulk processing failed");
+	} finally {
+		setIsBulkProcessing(false);
+	}
+}
+
 export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const router = useRouter();
 
@@ -319,6 +376,13 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 	const [showAddThemePage, setShowAddThemePage] = useState(false);
 	const [isUpdatingTheme, setIsUpdatingTheme] = useState(false);
 	const [showEditProject, setShowEditProject] = useState(false);
+	const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+
+	const handleProcessAll = () => {
+		if (project) {
+			bulkProcessSources({ project, setIsBulkProcessing });
+		}
+	};
 
 	// Pipeline stepper data
 	const pipelineSteps = useMemo((): PipelineStep[] => {
@@ -595,46 +659,13 @@ export function ProjectDetailContent({ projectId }: ProjectDetailContentProps) {
 			<ThemePageInfoCard themePage={themePage} />
 
 			{/* Content Sources Section */}
-			<Card className="p-6" id="section-sources">
-				<h3 className="mb-4 font-medium text-lg">Content Sources</h3>
-
-				{project.sources.length === 0 ? (
-					<div className="flex flex-col items-center justify-center py-8 text-center">
-						<div className="mb-4 rounded-full bg-muted p-4">
-							<FileText className="size-8 text-muted-foreground" />
-						</div>
-						<p className="text-muted-foreground">
-							No content sources added yet
-						</p>
-						<div className="mt-4 flex gap-2">
-							<AddSourceDialog
-								projectId={projectId}
-								trigger={
-									<Button variant="outline">
-										<LinkIcon className="size-4" />
-										Add Notion Page
-									</Button>
-								}
-							/>
-						</div>
-					</div>
-				) : (
-					<SourceList
-						onDelete={setDeleteSourceId}
-						projectId={projectId}
-						sources={project.sources.map((s) => ({
-							id: s.id as string,
-							type: s.type,
-							reference: s.reference,
-							name: s.name,
-							addedAt: s.addedAt,
-							status: s.status,
-							metadata: s.metadata,
-							error: s.metadata?.error as string | undefined,
-						}))}
-					/>
-				)}
-			</Card>
+			<ContentSourcesCard
+				isBulkProcessing={isBulkProcessing}
+				onDeleteSource={setDeleteSourceId}
+				onProcessAll={handleProcessAll}
+				project={project}
+				projectId={projectId}
+			/>
 
 			{/* Workflow Section: Classification, Comparison, Notes */}
 			{themePage && (
@@ -838,6 +869,87 @@ function ThemePageInfoCard({ themePage }: ThemePageInfoCardProps) {
 					</div>
 				</div>
 			</div>
+		</Card>
+	);
+}
+
+interface ContentSourcesCardProps {
+	project: Project;
+	projectId: string;
+	isBulkProcessing: boolean;
+	onProcessAll: () => void;
+	onDeleteSource: Dispatch<SetStateAction<string | null>>;
+}
+
+function ContentSourcesCard({
+	project,
+	projectId,
+	isBulkProcessing,
+	onProcessAll,
+	onDeleteSource,
+}: ContentSourcesCardProps) {
+	const hasPendingOrFailed = project.sources.some(
+		(s) => s.status === "pending" || s.status === "failed"
+	);
+	const pendingOrFailedCount = project.sources.filter(
+		(s) => s.status === "pending" || s.status === "failed"
+	).length;
+
+	return (
+		<Card className="p-6" id="section-sources">
+			<div className="mb-4 flex items-center justify-between">
+				<h3 className="font-medium text-lg">Content Sources</h3>
+				{hasPendingOrFailed && (
+					<Button
+						disabled={isBulkProcessing}
+						onClick={onProcessAll}
+						size="sm"
+						variant="outline"
+					>
+						{isBulkProcessing ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Play className="mr-2 h-4 w-4" />
+						)}
+						Process All ({pendingOrFailedCount})
+					</Button>
+				)}
+			</div>
+
+			{project.sources.length === 0 ? (
+				<div className="flex flex-col items-center justify-center py-8 text-center">
+					<div className="mb-4 rounded-full bg-muted p-4">
+						<FileText className="size-8 text-muted-foreground" />
+					</div>
+					<p className="text-muted-foreground">No content sources added yet</p>
+					<div className="mt-4 flex gap-2">
+						<AddSourceDialog
+							projectId={projectId}
+							trigger={
+								<Button variant="outline">
+									<LinkIcon className="size-4" />
+									Add Notion Page
+								</Button>
+							}
+						/>
+					</div>
+				</div>
+			) : (
+				<SourceList
+					onDelete={onDeleteSource}
+					projectId={projectId}
+					sources={project.sources.map((s) => ({
+						id: s.id as string,
+						type: s.type,
+						reference: s.reference,
+						name: s.name,
+						addedAt: s.addedAt,
+						status: s.status,
+						metadata: s.metadata,
+						error: s.metadata?.error as string | undefined,
+					}))}
+				/>
+			)}
 		</Card>
 	);
 }

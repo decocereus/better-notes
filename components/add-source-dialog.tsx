@@ -1,8 +1,15 @@
 "use client";
 
-import { useMutation } from "convex/react";
-import { CheckCircle, ExternalLink, Loader2, Upload } from "lucide-react";
-import { useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import {
+	BookOpen,
+	CheckCircle,
+	ExternalLink,
+	Loader2,
+	Upload,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { NotionPageSearch } from "@/components/notion-page-search";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +21,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { UploadZone } from "@/components/upload-zone";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -26,7 +34,7 @@ interface AddSourceDialogProps {
 	projectId: string;
 }
 
-type TabType = "notion" | "upload";
+type TabType = "notion" | "upload" | "library";
 
 interface SelectedPage {
 	id: string;
@@ -43,6 +51,51 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [uploadedFiles, setUploadedFiles] = useState<UploadResponse[]>([]);
+	const [librarySearch, setLibrarySearch] = useState("");
+
+	const allAssets = useQuery(api.assets.list, {});
+	const projectAssets = useQuery(
+		api.assets.listByProject,
+		projectId ? { projectId: projectId as never } : "skip"
+	);
+
+	const availableAssets = useMemo(() => {
+		if (!(allAssets && projectAssets)) {
+			return [];
+		}
+		const assignedIds = new Set(
+			projectAssets.map((a: { _id: string }) => a._id)
+		);
+		return allAssets.filter(
+			(a: { _id: string; processingStatus: string }) =>
+				a.processingStatus === "extraction_completed" && !assignedIds.has(a._id)
+		);
+	}, [allAssets, projectAssets]);
+
+	const assignAsset = useMutation(api.assets.assignToProject);
+
+	const handleAssignAsset = async (asset: {
+		_id: string;
+		filename: string;
+	}) => {
+		if (!projectId) {
+			return;
+		}
+		setIsLoading(true);
+		setError(null);
+		try {
+			await assignAsset({
+				id: asset._id as never,
+				projectId: projectId as never,
+			});
+			toast.success(`Added "${asset.filename}" to project`);
+			setOpen(false);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to assign asset");
+		} finally {
+			setIsLoading(false);
+		}
+	};
 
 	const handlePageSelect = (pageId: string, pageTitle: string) => {
 		setSelectedPage({ id: pageId, title: pageTitle });
@@ -59,8 +112,6 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 		setIsLoading(true);
 
 		try {
-			// Store the page ID as reference (not URL)
-			// This allows us to fetch content directly via API
 			await addSource({
 				projectId: projectId as Id<"projects">,
 				type: "notion",
@@ -68,7 +119,6 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 				name: selectedPage.title,
 			});
 
-			// Trigger processing of the source
 			await processNotionSource(selectedPage.id);
 
 			setSelectedPage(null);
@@ -81,7 +131,6 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 	};
 
 	const processNotionSource = async (pageId: string) => {
-		// Fetch and process the Notion page content
 		try {
 			const response = await fetch("/api/sources/process", {
 				method: "POST",
@@ -108,7 +157,6 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 	const handleUploadComplete = async (response: UploadResponse) => {
 		setUploadedFiles((prev) => [...prev, response]);
 
-		// Add uploaded file as content source
 		try {
 			const sourceType =
 				MIME_TO_SOURCE_TYPE[
@@ -138,11 +186,11 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 		if (!isLoading) {
 			setOpen(newOpen);
 			if (!newOpen) {
-				// Reset form on close
 				setSelectedPage(null);
 				setError(null);
 				setActiveTab("notion");
 				setUploadedFiles([]);
+				setLibrarySearch("");
 			}
 		}
 	};
@@ -154,7 +202,8 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 				<DialogHeader>
 					<DialogTitle>Add Content Source</DialogTitle>
 					<DialogDescription>
-						Add a Notion page or upload a file to this project.
+						Add a Notion page, upload a file, or use an existing asset from the
+						library.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -184,41 +233,31 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 						<Upload className="size-4" />
 						Upload File
 					</button>
+					<button
+						className={`flex items-center gap-2 border-b-2 px-4 py-2 font-medium text-sm transition-colors ${
+							activeTab === "library"
+								? "border-primary text-foreground"
+								: "border-transparent text-muted-foreground hover:text-foreground"
+						}`}
+						onClick={() => setActiveTab("library")}
+						type="button"
+					>
+						<BookOpen className="size-4" />
+						From Library
+					</button>
 				</div>
 
 				{/* Tab Content */}
 				<div className="py-4">
-					{activeTab === "notion" ? (
-						<div className="grid gap-4">
-							<div className="relative grid gap-2">
-								<NotionPageSearch
-									onError={setError}
-									onSelect={handlePageSelect}
-									placeholder="Search for a Notion page..."
-								/>
-								<p className="text-muted-foreground text-xs">
-									Search and select a Notion page to add as a content source.
-								</p>
-							</div>
-
-							{/* Selected page indicator */}
-							{selectedPage && (
-								<div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3">
-									<CheckCircle className="size-4 text-green-500" />
-									<span className="flex-1 truncate text-sm">
-										{selectedPage.title}
-									</span>
-									<Button
-										onClick={() => setSelectedPage(null)}
-										size="sm"
-										variant="ghost"
-									>
-										Change
-									</Button>
-								</div>
-							)}
-						</div>
-					) : (
+					{activeTab === "notion" && (
+						<NotionTabContent
+							onClearSelection={() => setSelectedPage(null)}
+							onPageSelect={handlePageSelect}
+							onSetError={setError}
+							selectedPage={selectedPage}
+						/>
+					)}
+					{activeTab === "upload" && (
 						<UploadZone
 							autoProcess
 							disabled={isLoading}
@@ -228,6 +267,14 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 							onUploadError={handleUploadError}
 							parameters={settings.extractionParameters}
 							projectId={projectId}
+						/>
+					)}
+					{activeTab === "library" && (
+						<LibraryTabContent
+							availableAssets={availableAssets}
+							librarySearch={librarySearch}
+							onAssignAsset={handleAssignAsset}
+							onSearchChange={setLibrarySearch}
 						/>
 					)}
 				</div>
@@ -257,5 +304,98 @@ export function AddSourceDialog({ trigger, projectId }: AddSourceDialogProps) {
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
+	);
+}
+
+interface NotionTabContentProps {
+	onPageSelect: (pageId: string, pageTitle: string) => void;
+	onSetError: (error: string | null) => void;
+	selectedPage: SelectedPage | null;
+	onClearSelection: () => void;
+}
+
+function NotionTabContent({
+	onPageSelect,
+	onSetError,
+	selectedPage,
+	onClearSelection,
+}: NotionTabContentProps) {
+	return (
+		<div className="grid gap-4">
+			<div className="relative grid gap-2">
+				<NotionPageSearch
+					onError={onSetError}
+					onSelect={onPageSelect}
+					placeholder="Search for a Notion page..."
+				/>
+				<p className="text-muted-foreground text-xs">
+					Search and select a Notion page to add as a content source.
+				</p>
+			</div>
+
+			{selectedPage && (
+				<div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3">
+					<CheckCircle className="size-4 text-green-500" />
+					<span className="flex-1 truncate text-sm">{selectedPage.title}</span>
+					<Button onClick={onClearSelection} size="sm" variant="ghost">
+						Change
+					</Button>
+				</div>
+			)}
+		</div>
+	);
+}
+
+interface LibraryTabContentProps {
+	availableAssets: {
+		_id: string;
+		filename: string;
+		extractedItemCount?: number;
+	}[];
+	librarySearch: string;
+	onSearchChange: (value: string) => void;
+	onAssignAsset: (asset: { _id: string; filename: string }) => void;
+}
+
+function LibraryTabContent({
+	availableAssets,
+	librarySearch,
+	onSearchChange,
+	onAssignAsset,
+}: LibraryTabContentProps) {
+	return (
+		<div className="space-y-3">
+			<Input
+				onChange={(e) => onSearchChange(e.target.value)}
+				placeholder="Search assets..."
+				value={librarySearch}
+			/>
+			<div className="max-h-60 space-y-2 overflow-y-auto">
+				{availableAssets
+					.filter((a) =>
+						a.filename.toLowerCase().includes(librarySearch.toLowerCase())
+					)
+					.map((asset) => (
+						<button
+							className="flex w-full items-center justify-between rounded-lg border p-3 text-left transition-colors hover:bg-muted"
+							key={asset._id}
+							onClick={() => onAssignAsset(asset)}
+							type="button"
+						>
+							<div>
+								<p className="font-medium text-sm">{asset.filename}</p>
+								<p className="text-muted-foreground text-xs">
+									{asset.extractedItemCount ?? 0} items extracted
+								</p>
+							</div>
+						</button>
+					))}
+				{availableAssets.length === 0 && (
+					<p className="py-4 text-center text-muted-foreground text-sm">
+						No completed assets available
+					</p>
+				)}
+			</div>
+		</div>
 	);
 }
