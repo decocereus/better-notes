@@ -5,7 +5,7 @@ import { filterBySource } from "@/lib/comparison/gap-analyzer";
 import { enforceNoteConciseness } from "@/lib/generation/conciseness";
 import { generateNotesForTheme } from "@/lib/generation/note-generator";
 import { getModelForTask } from "@/lib/llm/provider";
-import { uploadToR2 } from "@/lib/storage";
+import { downloadFromR2, uploadToR2 } from "@/lib/storage";
 import type { ExtractedContent } from "@/types/extraction";
 import type { GeneratedNote, GenerationConfig } from "@/types/generation";
 import { DEFAULT_GENERATION_CONFIG } from "@/types/generation";
@@ -178,4 +178,59 @@ export async function POST(
 			{ status: 500 }
 		);
 	}
+}
+
+/**
+ * GET /api/generate?resultsKey=xxx
+ * Loads a previously generated note from R2 by its storage key.
+ */
+export async function GET(
+	request: Request
+): Promise<NextResponse<GenerateResponse>> {
+	const { searchParams } = new URL(request.url);
+	const resultsKey = searchParams.get("resultsKey");
+
+	if (!resultsKey) {
+		return NextResponse.json(
+			{ success: false, error: "resultsKey query parameter is required" },
+			{ status: 400 }
+		);
+	}
+
+	try {
+		const { body: stream } = await downloadFromR2(resultsKey);
+		const text = await streamToString(stream);
+		const note = JSON.parse(text) as GeneratedNote;
+		return NextResponse.json({ success: true, note });
+	} catch {
+		return NextResponse.json(
+			{ success: false, error: "Note not found" },
+			{ status: 404 }
+		);
+	}
+}
+
+async function streamToString(stream: ReadableStream): Promise<string> {
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+
+	let done = false;
+	while (!done) {
+		const result = await reader.read();
+		done = result.done;
+		if (result.value) {
+			chunks.push(result.value);
+		}
+	}
+
+	const combined = new Uint8Array(
+		chunks.reduce((acc, chunk) => acc + chunk.length, 0)
+	);
+	let offset = 0;
+	for (const chunk of chunks) {
+		combined.set(chunk, offset);
+		offset += chunk.length;
+	}
+
+	return new TextDecoder().decode(combined);
 }

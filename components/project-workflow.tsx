@@ -17,7 +17,7 @@ import {
 	Sparkles,
 	Tag,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ClassificationReview } from "@/components/classification-review";
@@ -300,7 +300,7 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		api.comparisonResults.listByProject,
 		projectIdValue ? { projectId: projectIdValue as never } : "skip"
 	);
-	const _persistedNotes = useQuery(
+	const persistedNotes = useQuery(
 		api.generatedNotes.listByProject,
 		projectIdValue ? { projectId: projectIdValue as never } : "skip"
 	);
@@ -420,6 +420,16 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		miniTheme: MiniTheme;
 	} | null>(null);
 
+	// Notes state: maps miniThemeId -> GeneratedNote
+	const [loadedNotes, setLoadedNotes] = useState<Record<string, GeneratedNote>>(
+		{}
+	);
+
+	// Track which jobs we've already loaded full results for
+	const loadedClassificationJobRef = useRef<string | null>(null);
+	const loadedComparisonJobsRef = useRef<Set<string>>(new Set());
+	const loadedNoteKeysRef = useRef<Set<string>>(new Set());
+
 	// Poll for classification status
 	const pollClassificationStatus = useCallback(async (jobId: string) => {
 		try {
@@ -444,6 +454,10 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 							: undefined,
 				}));
 
+				if (data.results) {
+					loadedClassificationJobRef.current = jobId;
+				}
+
 				// Continue polling while job is pending or processing
 				if (data.job.status === "pending" || data.job.status === "processing") {
 					setTimeout(() => pollClassificationStatus(jobId), 2000);
@@ -454,39 +468,154 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 		}
 	}, []);
 
-	// Initialize classification state from Convex
+	// Initialize classification state from Convex + load full results from R2
 	useEffect(() => {
-		if (latestClassification && latestClassification.status === "completed") {
-			setClassification((prev) => ({
-				...prev,
-				jobId: latestClassification.jobId,
-				status: "completed",
-				progress: 100,
-				totalItems: latestClassification.totalItems,
-				processedItems: latestClassification.classifiedItems,
-			}));
+		if (!latestClassification || latestClassification.status !== "completed") {
+			return;
 		}
+
+		const jobId = latestClassification.jobId;
+
+		// Set metadata immediately
+		setClassification((prev) => ({
+			...prev,
+			jobId,
+			status: "completed",
+			progress: 100,
+			totalItems: latestClassification.totalItems,
+			processedItems: latestClassification.classifiedItems,
+		}));
+
+		// Skip fetching if we already loaded results for this job
+		if (loadedClassificationJobRef.current === jobId) {
+			return;
+		}
+
+		// Fetch full results (themes + classified content) from R2
+		const loadResults = async () => {
+			try {
+				const response = await fetch(`/api/classify?jobId=${jobId}`);
+				if (!response.ok) {
+					return;
+				}
+				const data = await response.json();
+				if (data.results) {
+					loadedClassificationJobRef.current = jobId;
+					setClassification((prev) => ({
+						...prev,
+						results: data.results,
+					}));
+				}
+			} catch {
+				// Silently fail — user can re-classify if needed
+			}
+		};
+		loadResults();
 	}, [latestClassification]);
 
-	// Initialize comparison scores from Convex
+	// Initialize comparison state from Convex + load full results from R2
 	useEffect(() => {
-		if (persistedComparisons && persistedComparisons.length > 0) {
-			setComparisons((prev) => {
-				const next = { ...prev };
-				for (const comp of persistedComparisons) {
-					if (comp.status === "completed") {
-						next[comp.miniThemeId] = {
-							...next[comp.miniThemeId],
-							status: "completed",
-							score: comp.score,
-							jobId: comp.jobId,
-						} as ComparisonState[string];
-					}
-				}
-				return next;
-			});
+		if (!persistedComparisons || persistedComparisons.length === 0) {
+			return;
 		}
+
+		const completedComparisons = persistedComparisons.filter(
+			(comp) => comp.status === "completed"
+		);
+
+		// Set metadata immediately (use composite key matching the UI)
+		setComparisons((prev) => {
+			const next = { ...prev };
+			for (const comp of completedComparisons) {
+				const themeKey = `${comp.mainThemeId}-${comp.miniThemeId}`;
+				if (!next[themeKey]?.result) {
+					next[themeKey] = {
+						...next[themeKey],
+						status: "completed",
+						jobId: comp.jobId,
+						result: null,
+					};
+				}
+			}
+			return next;
+		});
+
+		// Fetch full results from R2 for comparisons we haven't loaded yet
+		const loadAll = async () => {
+			const toLoad = completedComparisons.filter(
+				(comp) => !loadedComparisonJobsRef.current.has(comp.jobId)
+			);
+
+			await Promise.all(
+				toLoad.map(async (comp) => {
+					const themeKey = `${comp.mainThemeId}-${comp.miniThemeId}`;
+					try {
+						const response = await fetch(`/api/compare?jobId=${comp.jobId}`);
+						if (!response.ok) {
+							return;
+						}
+						const data = await response.json();
+						if (data.results?.result) {
+							loadedComparisonJobsRef.current.add(comp.jobId);
+							setComparisons((prev) => ({
+								...prev,
+								[themeKey]: {
+									...prev[themeKey],
+									status: "completed",
+									jobId: comp.jobId,
+									result: data.results.result,
+								},
+							}));
+						}
+					} catch {
+						// Silently fail
+					}
+				})
+			);
+		};
+		loadAll();
 	}, [persistedComparisons]);
+
+	// Initialize notes from Convex + load full content from R2
+	useEffect(() => {
+		if (!persistedNotes || persistedNotes.length === 0) {
+			return;
+		}
+
+		const toLoad = persistedNotes.filter(
+			(n) => n.resultsKey && !loadedNoteKeysRef.current.has(n.resultsKey)
+		);
+
+		if (toLoad.length === 0) {
+			return;
+		}
+
+		const loadAll = async () => {
+			await Promise.all(
+				toLoad.map(async (noteMeta) => {
+					try {
+						const response = await fetch(
+							`/api/generate?resultsKey=${encodeURIComponent(noteMeta.resultsKey)}`
+						);
+						if (!response.ok) {
+							return;
+						}
+						const data = await response.json();
+						if (data.success && data.note) {
+							loadedNoteKeysRef.current.add(noteMeta.resultsKey);
+							setLoadedNotes((prev) => ({
+								...prev,
+								[noteMeta.miniThemeId]: data.note,
+							}));
+						}
+					} catch {
+						// Silently fail
+					}
+				})
+			);
+		};
+		loadAll();
+	}, [persistedNotes]);
 
 	// Resume polling for in-progress classification from Convex
 	useEffect(() => {
@@ -661,6 +790,7 @@ export function ProjectWorkflow(props: ProjectWorkflowProps) {
 				classification={classification}
 				comparisons={comparisons}
 				getContentForTheme={getContentForTheme}
+				loadedNotes={loadedNotes}
 				onCompare={startComparison}
 				projectId={projectIdValue}
 				themes={themes}
@@ -872,6 +1002,7 @@ interface ComparisonSectionContainerProps {
 	themes: MainTheme[];
 	comparisons: ComparisonState;
 	projectId: string;
+	loadedNotes: Record<string, GeneratedNote>;
 	onCompare: (mainTheme: MainTheme, miniTheme: MiniTheme) => void;
 	getContentForTheme: (
 		mainThemeId: string,
@@ -884,6 +1015,7 @@ function ComparisonSectionContainer({
 	themes,
 	comparisons,
 	projectId,
+	loadedNotes,
 	onCompare,
 	getContentForTheme,
 }: ComparisonSectionContainerProps) {
@@ -896,6 +1028,7 @@ function ComparisonSectionContainer({
 			comparisons={comparisons}
 			content={classification.results.classifiedContent}
 			getContentForTheme={getContentForTheme}
+			loadedNotes={loadedNotes}
 			onCompare={onCompare}
 			projectId={projectId}
 			themes={themes}
@@ -1099,6 +1232,7 @@ interface ComparisonSectionProps {
 	content: ExtractedContent[];
 	comparisons: ComparisonState;
 	projectId: string;
+	loadedNotes: Record<string, GeneratedNote>;
 	onCompare: (mainTheme: MainTheme, miniTheme: MiniTheme) => void;
 	getContentForTheme: (
 		mainThemeId: string,
@@ -1110,6 +1244,7 @@ function ComparisonSection({
 	themes,
 	comparisons,
 	projectId,
+	loadedNotes,
 	onCompare,
 	getContentForTheme,
 }: ComparisonSectionProps) {
@@ -1224,6 +1359,7 @@ function ComparisonSection({
 																mainTheme.id,
 																miniTheme.id
 															)}
+															existingNote={loadedNotes[miniTheme.id] ?? null}
 															mainTheme={mainTheme}
 															miniTheme={miniTheme}
 															onRecompare={() =>
@@ -1285,6 +1421,7 @@ interface ThemeActionsProps {
 	miniTheme: MiniTheme;
 	content: ExtractedContent[];
 	comparison: ThemeComparisonResult;
+	existingNote: GeneratedNote | null;
 	projectId: string;
 	onRecompare: () => void;
 }
@@ -1294,13 +1431,21 @@ function ThemeActions({
 	miniTheme,
 	content,
 	comparison,
+	existingNote,
 	projectId,
 	onRecompare,
 }: ThemeActionsProps) {
 	const [view, setView] = useState<"none" | "comparison" | "notes">("none");
 	const [generatedNote, setGeneratedNote] = useState<GeneratedNote | null>(
-		null
+		existingNote
 	);
+
+	// Sync when existingNote arrives asynchronously from R2
+	useEffect(() => {
+		if (existingNote && !generatedNote) {
+			setGeneratedNote(existingNote);
+		}
+	}, [existingNote, generatedNote]);
 
 	const handleNoteGenerated = (note: GeneratedNote) => {
 		setGeneratedNote(note);

@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, Loader2, RefreshCw, Sparkles } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RevisionNote } from "@/components/revision-note";
 import { SyncButton, SyncStatusBadge } from "@/components/sync-status";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,13 @@ export function NoteGenerationPanel({
 	const [note, setNote] = useState<GeneratedNote | null>(existingNote || null);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	// Sync when existingNote arrives after initial mount (async R2 load)
+	useEffect(() => {
+		if (existingNote && !note) {
+			setNote(existingNote);
+		}
+	}, [existingNote, note]);
 
 	const persistNote = useCallback(
 		async (noteToSave: GeneratedNote) => {
